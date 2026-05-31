@@ -1,0 +1,29 @@
+# 1. 创建 .gitignore 文件（在工程根目录下）
+@"
+# Keil 编译输出
+*.o
+*.d
+*.crf
+*.axf
+*.htm
+*.lnp
+*.sct
+*.dep
+*.lst
+*.map
+*.iex
+Output/
+Listings/
+RTE/
+*.uvguix.*
+*.bak
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 系统文件
+Thumbs.db
+Desktop.ini
+"@ | Out-File -Encoding utf8 .gitignore
+
