@@ -1,0 +1,80 @@
+修改 ota_update.c 的 start_md_update()，先下载到临时文件，成功后再替换：
+
+
+c
+c
+bool start_md_update(bool is_diff)
+{
+    char url[160];
+    char model_path[80];
+    char temp_path[80];
+
+    printf("[MD] %s: v%s -> v%s\r\n",
+           is_diff ? "DIFF" : "FULL",
+           D.md_ver, D.md_ver_new);
+
+    if (is_diff) {
+        snprintf(url, sizeof(url), "%smodel/%s/%s",
+                 API_CHUNK_PATCH, D.md_ver, D.md_ver_new);
+    } else {
+        snprintf(url, sizeof(url), "%s%s", API_CHUNK_MODEL, D.md_ver_new);
+    }
+
+    /* 确保目录存在 */
+    f_mkdir(SD_OTA_DIR);
+    f_mkdir(SD_MODEL_DIR);
+
+    /* 先下载到临时文件，成功后再替换 */
+    snprintf(temp_path, sizeof(temp_path), "%s/model_tmp.bin", SD_MODEL_DIR);
+    snprintf(model_path, sizeof(model_path), "%s/model.bin", SD_MODEL_DIR);
+
+    printf("[MD] Download to: %s\r\n", temp_path);
+
+    bool ok = dl_to_sd(url,
+                       is_diff ? D.md_patch_sz : D.md_sz,
+                       temp_path);                        /* 先下载到临时文件 */
+    if (!ok) {
+        f_unlink(temp_path);                              /* 失败则删除临时文件 */
+        return false;
+    }
+
+    /* 下载成功，替换旧文件 */
+    f_unlink(model_path);                                 /* 删除旧模型 */
+    if (f_rename(temp_path, model_path) != FR_OK) {       /* 临时文件 → 正式文件 */
+        printf("[MD] rename fail\r\n");
+        snprintf(g_dl.msg, sizeof(g_dl.msg), "Rename error");
+        return false;
+    }
+
+    printf("[MD] Model replaced: %s\r\n", model_path);
+
+    /* 写版本号 */
+    FIL f; UINT bw;
+    if (f_open(&f, SD_MD_VER_FILE, FA_CREATE_ALWAYS | FA_WRITE) == FR_OK) {
+        f_write(&f, D.md_ver_new, strlen(D.md_ver_new), &bw);
+        f_sync(&f);
+        f_close(&f);
+    }
+
+    snprintf(D.md_ver, sizeof(D.md_ver), "%s", D.md_ver_new);
+    snprintf(g_dl.msg, sizeof(g_dl.msg),
+             "Model v%s OK", D.md_ver_new);
+    return true;
+}
+
+只改这一个函数，其余全部不动。
+
+
+
+安全流程
+
+text
+text
+正常:
+  下载 model_tmp.bin → 成功 → 删除旧 model.bin → 重命名 → 重启 ✓
+
+断电（下载中）:
+  model_tmp.bin 不完整 → 重启 → me_load("model.bin") 读旧的（还在） ✓
+
+断电（重命名后）:
+  model.bin 已是新文件（完整） → 重启 → 加载新模型 ✓

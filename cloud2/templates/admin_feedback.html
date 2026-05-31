@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}反馈管理 - OTA管理平台{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb-bar"><a href="/admin">仪表盘</a><span>/</span><span>反馈管理</span></div>
+    <h4>反馈管理</h4>
+    <div class="sub">查看和回复用户反馈</div>
+</div>
+
+<div class="card anim-1">
+    <div class="card-header">
+        <div class="card-header-icon green">💬</div><span>全部反馈</span>
+        <span class="count-badge">{{ feedbacks | length }}</span>
+    </div>
+    <div class="card-body p-0">
+        {% if feedbacks %}
+        {% for fb in feedbacks %}
+        <div style="padding:18px 22px;border-bottom:1px solid var(--border);">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <strong>{{ fb.user.username }}</strong>
+                {% if fb.status == 'unread' %}<span class="badge badge-pending">未读</span>
+                {% elif fb.status == 'replied' %}<span class="badge badge-success">已回复</span>
+                {% else %}<span class="badge" style="background:#f1f5f9;color:#64748b">{{ fb.status }}</span>{% endif %}
+                <span class="time-text">{{ fb.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+            </div>
+            <div style="font-weight:600;margin-bottom:6px;">{{ fb.subject }}</div>
+            <div style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:10px;">{{ fb.content }}</div>
+            {% if fb.reply %}
+            <div style="background:var(--ok-light);padding:10px 14px;border-radius:var(--radius-sm);font-size:0.85rem;margin-bottom:10px;">
+                <strong style="color:var(--ok)">管理员回复：</strong> {{ fb.reply }}
+            </div>
+            {% endif %}
+            {% if fb.status != 'replied' %}
+            <form action="/admin/feedback/reply/{{ fb.id }}" method="POST" style="display:flex;gap:8px;">
+                <input class="form-control" name="reply" placeholder="输入回复内容..." style="flex:1;" required>
+                <button class="btn btn-primary btn-sm" type="submit">回复</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="empty-state"><div class="empty-icon">💬</div><div class="empty-text">暂无反馈</div></div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

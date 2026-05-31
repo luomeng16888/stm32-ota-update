@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}OTA 管理平台{% endblock %}</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f5f6fa;--sidebar-bg:#0f1629;--sidebar-hover:rgba(255,255,255,0.08);--sidebar-active:linear-gradient(135deg,rgba(59,130,246,0.25),rgba(139,92,246,0.15));--card-bg:#fff;--border:#e8ecf1;--text-primary:#1e293b;--text-secondary:#64748b;--text-muted:#94a3b8;--accent:#3b82f6;--accent-light:rgba(59,130,246,0.08);--ok:#22c55e;--ok-light:rgba(34,197,94,0.08);--warn:#f59e0b;--warn-light:rgba(245,158,11,0.08);--danger:#ef4444;--danger-light:rgba(239,68,68,0.08);--purple:#8b5cf6;--purple-light:rgba(139,92,246,0.08);--cyan:#06b6d4;--cyan-light:rgba(6,182,212,0.08);--radius:14px;--radius-sm:10px;--shadow-sm:0 1px 3px rgba(0,0,0,0.04);--shadow:0 4px 16px rgba(0,0,0,0.06);--font-body:'Noto Sans SC',system-ui,sans-serif;--font-mono:'JetBrains Mono','Menlo',monospace}
+*{margin:0;padding:0;box-sizing:border-box}
+html{font-size:14px}
+body{background:var(--bg);color:var(--text-primary);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased}
+.app-layout{display:flex;min-height:100vh}
+.sidebar{width:240px;min-height:100vh;background:var(--sidebar-bg);position:fixed;top:0;left:0;z-index:100;display:flex;flex-direction:column;overflow-y:auto}
+.sidebar-brand{padding:24px 20px;border-bottom:1px solid rgba(255,255,255,0.06);display:flex;align-items:center;gap:12px}
+.brand-icon{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--purple));display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;flex-shrink:0;box-shadow:0 0 20px rgba(59,130,246,0.3)}
+.brand-text{color:#fff;font-weight:600;font-size:1.05rem}.brand-sub{color:rgba(255,255,255,0.35);font-size:0.7rem;margin-top:1px}
+.sidebar-nav{padding:12px 0;flex:1}
+.nav-section-title{padding:12px 24px 6px;font-size:0.68rem;font-weight:600;color:rgba(255,255,255,0.25);text-transform:uppercase;letter-spacing:0.1em}
+.nav-item{display:flex;align-items:center;gap:12px;padding:10px 20px;margin:2px 12px;border-radius:var(--radius-sm);color:rgba(255,255,255,0.55);text-decoration:none;font-size:0.9rem;transition:all 0.2s;position:relative}
+.nav-item:hover{color:rgba(255,255,255,0.9);background:var(--sidebar-hover)}
+.nav-item.active{color:#fff;background:var(--sidebar-active);font-weight:500}
+.nav-item.active::before{content:'';position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:20px;border-radius:0 3px 3px 0;background:var(--accent)}
+.nav-icon{width:20px;text-align:center;font-size:1rem;flex-shrink:0;opacity:0.8}
+.nav-badge{margin-left:auto;background:var(--danger);color:#fff;font-size:0.65rem;font-weight:600;padding:1px 7px;border-radius:10px;min-width:18px;text-align:center}
+.sidebar-footer{padding:16px 20px;border-top:1px solid rgba(255,255,255,0.06)}
+.main-content{margin-left:240px;flex:1;padding:28px 32px 48px;min-width:0}
+.page-header{margin-bottom:24px;animation:fadeUp 0.4s ease both}
+.page-header h4{font-weight:700;font-size:1.4rem;margin-bottom:4px}
+.page-header .sub{color:var(--text-muted);font-size:0.85rem}
+.breadcrumb-bar{display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--text-muted);margin-bottom:8px}
+.breadcrumb-bar a{color:var(--accent);text-decoration:none}.breadcrumb-bar a:hover{text-decoration:underline}
+.card{border:1px solid var(--border);border-radius:var(--radius);background:var(--card-bg);box-shadow:var(--shadow-sm);transition:all 0.3s;overflow:hidden}
+.card:hover{box-shadow:var(--shadow)}
+.card-header{background:transparent;border-bottom:1px solid var(--border);padding:16px 22px;font-weight:600;font-size:0.95rem;display:flex;align-items:center;gap:10px;border-radius:var(--radius) var(--radius) 0 0!important}
+.card-header-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:0.9rem;flex-shrink:0}
+.card-header-icon.blue{background:var(--accent-light);color:var(--accent)}.card-header-icon.orange{background:var(--warn-light);color:var(--warn)}.card-header-icon.purple{background:var(--purple-light);color:var(--purple)}.card-header-icon.cyan{background:var(--cyan-light);color:var(--cyan)}.card-header-icon.green{background:var(--ok-light);color:var(--ok)}.card-header-icon.red{background:var(--danger-light);color:var(--danger)}
+.card-header .count-badge{margin-left:auto;background:var(--accent-light);color:var(--accent);font-size:0.72rem;font-weight:600;padding:2px 10px;border-radius:12px;font-family:var(--font-mono)}
+.card-body{padding:20px 22px}
+.form-label{font-weight:600;font-size:0.82rem;color:var(--text-secondary);margin-bottom:6px}
+.form-select,.form-control{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px;font-size:0.88rem;color:var(--text-primary);background:var(--card-bg);transition:all 0.2s}
+.form-select:focus,.form-control:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light)}
+.form-check-input:checked{background-color:var(--accent);border-color:var(--accent)}
+.btn{font-weight:600;font-size:0.85rem;border-radius:var(--radius-sm);padding:10px 20px;transition:all 0.25s;letter-spacing:0.01em;border:none}
+.btn:active{transform:scale(0.97)}
+.btn-primary{background:linear-gradient(135deg,var(--accent),#2563eb);color:#fff;box-shadow:0 2px 8px rgba(59,130,246,0.3)}
+.btn-primary:hover{background:linear-gradient(135deg,#2563eb,#1d4ed8);box-shadow:0 4px 16px rgba(59,130,246,0.4);transform:translateY(-1px);color:#fff}
+.btn-warning{background:linear-gradient(135deg,var(--warn),#d97706);color:#fff;box-shadow:0 2px 8px rgba(245,158,11,0.3)}
+.btn-warning:hover{background:linear-gradient(135deg,#d97706,#b45309);color:#fff}
+.btn-success{background:linear-gradient(135deg,var(--ok),#16a34a);color:#fff;box-shadow:0 2px 8px rgba(34,197,94,0.3)}
+.btn-success:hover{background:linear-gradient(135deg,#16a34a,#15803d);color:#fff}
+.btn-outline-danger{border:1px solid rgba(239,68,68,0.3);color:var(--danger);background:transparent}
+.btn-outline-danger:hover{background:var(--danger-light);border-color:var(--danger)}
+.btn-outline-primary{border:1px solid rgba(59,130,246,0.3);color:var(--accent);background:transparent}
+.btn-outline-primary:hover{background:var(--accent-light);border-color:var(--accent)}
+.btn-sm{padding:5px 14px;font-size:0.76rem;border-radius:8px}
+.table{margin-bottom:0;font-size:0.85rem}
+.table thead th{background:#f8f9fb;font-weight:600;font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;padding:10px 16px;border-bottom:1px solid var(--border)}
+.table tbody td{padding:12px 16px;vertical-align:middle;border-bottom:1px solid #f1f3f6}
+.table tbody tr{transition:background 0.15s}.table tbody tr:hover{background:#f8f9fc}.table tbody tr:last-child td{border-bottom:none}
+.badge{font-weight:600;font-size:0.7rem;padding:4px 10px;border-radius:6px;letter-spacing:0.02em}
+.badge-firmware{background:var(--accent-light);color:var(--accent)}.badge-model{background:var(--cyan-light);color:var(--cyan)}.badge-pending{background:var(--warn-light);color:#b45309}.badge-success{background:var(--ok-light);color:#15803d}.badge-failed{background:var(--danger-light);color:#b91c1c}.badge-full{background:var(--purple-light);color:var(--purple)}.badge-diff{background:var(--cyan-light);color:var(--cyan)}
+.status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.status-dot.online{background:var(--ok);box-shadow:0 0 6px rgba(34,197,94,0.5)}.status-dot.offline{background:var(--text-muted);opacity:0.5}
+.ver-text{font-family:var(--font-mono);font-weight:500;font-size:0.88rem}.ver-arrow{color:var(--text-muted);margin:0 6px}.size-text{font-family:var(--font-mono);font-size:0.8rem;color:var(--text-secondary)}.time-text{font-size:0.78rem;color:var(--text-muted)}
+.empty-state{text-align:center;padding:40px 20px;color:var(--text-muted)}.empty-icon{font-size:2rem;margin-bottom:8px;opacity:0.3}.empty-text{font-size:0.88rem}.empty-hint{font-size:0.78rem;margin-top:4px;opacity:0.7}
+.alert{border:none;border-radius:var(--radius-sm);font-size:0.88rem;font-weight:500;padding:14px 18px;margin-bottom:20px}
+.alert-info{background:var(--accent-light);color:var(--accent);border-left:4px solid var(--accent)}
+.device-checklist{max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;background:#fafbfc;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+.device-checklist::-webkit-scrollbar{width:4px}.device-checklist::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+.device-checklist .form-check{padding:6px 8px;border-radius:8px;transition:background 0.15s;margin-bottom:2px}
+.device-checklist .form-check:hover{background:rgba(59,130,246,0.04)}
+.dev-info{font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted);margin-left:2px}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.anim-1{animation:fadeUp 0.4s ease both;animation-delay:0.05s}.anim-2{animation:fadeUp 0.4s ease both;animation-delay:0.1s}.anim-3{animation:fadeUp 0.4s ease both;animation-delay:0.15s}.anim-4{animation:fadeUp 0.4s ease both;animation-delay:0.2s}
+.stat-card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:22px 24px;position:relative;overflow:hidden;transition:all 0.3s}
+.stat-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow)}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:0;transition:opacity 0.3s}
+.stat-card:hover::before{opacity:1}
+.stat-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;margin-bottom:12px}
+.stat-label{font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px}
+.stat-val{font-family:var(--font-mono);font-size:1.8rem;font-weight:500;line-height:1.1}
+@media(max-width:992px){.sidebar{transform:translateX(-100%)}.main-content{margin-left:0;padding:16px}}
+</style>
+{% block extra_css %}{% endblock %}
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">O</div>
+            <div><div class="brand-text">OTA 管理平台</div><div class="brand-sub">Firmware Management</div></div>
+        </div>
+        <nav class="sidebar-nav">
+            <div class="nav-section-title">概览</div>
+            <a class="nav-item {% if request.path == '/admin' %}active{% endif %}" href="/admin">
+                <span class="nav-icon">📊</span> 仪表盘
+            </a>
+            <div class="nav-section-title">管理</div>
+            <a class="nav-item {% if '/users' in request.path %}active{% endif %}" href="/admin/users">
+                <span class="nav-icon">👥</span> 用户管理
+            </a>
+            <a class="nav-item {% if '/firmware' in request.path %}active{% endif %}" href="/admin/firmware">
+                <span class="nav-icon">📦</span> 固件管理
+            </a>
+            <a class="nav-item {% if '/model' in request.path %}active{% endif %}" href="/admin/model">
+                <span class="nav-icon">🧠</span> 模型管理
+            </a>
+            <a class="nav-item {% if '/push' in request.path %}active{% endif %}" href="/admin/push">
+                <span class="nav-icon">🚀</span> 版本推送
+            </a>
+            <div class="nav-section-title">其他</div>
+            <a class="nav-item {% if '/feedback' in request.path %}active{% endif %}" href="/admin/feedback">
+                <span class="nav-icon">💬</span> 反馈管理
+                {% if unread_feedbacks is defined and unread_feedbacks > 0 %}
+                <span class="nav-badge">{{ unread_feedbacks }}</span>
+                {% endif %}
+            </a>
+            <a class="nav-item {% if '/logs' in request.path %}active{% endif %}" href="/admin/logs">
+                <span class="nav-icon">📋</span> 系统日志
+            </a>
+            <a class="nav-item" href="/dashboard">
+                <span class="nav-icon">📡</span> 监控面板
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <a class="nav-item" href="/logout" style="margin:0;padding:8px 12px;">
+                <span class="nav-icon">🚪</span> 退出登录
+            </a>
+        </div>
+    </aside>
+    <main class="main-content">
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        {% for msg in messages %}
+        <div class="alert alert-info alert-dismissible fade show" role="alert">
+            {{ msg }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" style="font-size:0.7rem;"></button>
+        </div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}用户管理 - OTA管理平台{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb-bar"><a href="/admin">仪表盘</a><span>/</span><span>用户管理</span></div>
+    <h4>用户管理</h4>
+    <div class="sub">管理平台注册用户与设备绑定</div>
+</div>
+<div class="card anim-1">
+    <div class="card-header">
+        <div class="card-header-icon purple">👥</div><span>全部用户</span>
+        <span class="count-badge">{{ users | length }}</span>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead><tr><th>用户名</th><th>邮箱</th><th>角色</th><th>设备数</th><th>注册时间</th><th>最后登录</th></tr></thead>
+            <tbody>
+            {% for u in users %}
+            <tr>
+                <td><strong>{{ u.username }}</strong></td>
+                <td>{{ u.email or '—' }}</td>
+                <td>{% if u.role == 'admin' %}<span class="badge badge-firmware">管理员</span>{% else %}<span class="badge" style="background:#f1f5f9;color:#64748b">普通用户</span>{% endif %}</td>
+                <td><span class="ver-text">{{ u.devices | length }}</span></td>
+                <td><span class="time-text">{{ u.created_at.strftime('%Y-%m-%d %H:%M') }}</span></td>
+                <td><span class="time-text">{{ u.last_login.strftime('%m-%d %H:%M') if u.last_login else '从未' }}</span></td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

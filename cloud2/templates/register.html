@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>注册 - OTA管理平台</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--accent:#3b82f6;--accent-light:rgba(59,130,246,0.08);--bg:#f5f6fa;--card:#fff;--border:#e8ecf1;--text-primary:#1e293b;--text-secondary:#64748b;--text-muted:#94a3b8;--radius:14px;--radius-sm:10px;--font-body:'Noto Sans SC',system-ui,sans-serif;--purple:#8b5cf6}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);font-family:var(--font-body);min-height:100vh;display:flex;align-items:center;justify-content:center;-webkit-font-smoothing:antialiased}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 600px 400px at 30% 50%,rgba(59,130,246,.05),transparent),radial-gradient(ellipse 500px 300px at 70% 30%,rgba(139,92,246,.04),transparent)}
+.login-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:40px;width:400px;box-shadow:0 8px 32px rgba(0,0,0,0.06);animation:fadeUp 0.5s ease both}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.logo{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--purple));display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#fff;margin:0 auto 20px;box-shadow:0 0 24px rgba(59,130,246,0.3)}
+h2{text-align:center;font-weight:700;font-size:1.3rem;margin-bottom:4px}
+.sub{text-align:center;color:var(--text-muted);font-size:0.85rem;margin-bottom:28px}
+.form-label{font-weight:600;font-size:0.82rem;color:var(--text-secondary);margin-bottom:6px}
+.form-control{border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px 14px;font-size:0.9rem;transition:all 0.2s}
+.form-control:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light)}
+.btn-primary{background:linear-gradient(135deg,var(--accent),#2563eb);border:none;border-radius:var(--radius-sm);padding:11px;font-weight:600;font-size:0.9rem;box-shadow:0 2px 8px rgba(59,130,246,0.3);transition:all 0.25s}
+.btn-primary:hover{background:linear-gradient(135deg,#2563eb,#1d4ed8);box-shadow:0 4px 16px rgba(59,130,246,0.4);transform:translateY(-1px)}
+.alert{border:none;border-radius:var(--radius-sm);font-size:0.85rem;font-weight:500;background:rgba(239,68,68,0.08);color:#ef4444;border-left:4px solid #ef4444}
+a{color:var(--accent);text-decoration:none;font-size:0.85rem}a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="login-card">
+    <div class="logo">O</div>
+    <h2>创建账号</h2>
+    <div class="sub">注册 OTA 管理平台账号</div>
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    {% for msg in messages %}
+    <div class="alert" role="alert">{{ msg }}</div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+    <form method="POST">
+        <div class="mb-3">
+            <label class="form-label">用户名</label>
+            <input class="form-control" type="text" name="username" placeholder="请输入用户名" required autofocus>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">邮箱 (可选)</label>
+            <input class="form-control" type="email" name="email" placeholder="your@email.com">
+        </div>
+        <div class="mb-3">
+            <label class="form-label">密码</label>
+            <input class="form-control" type="password" name="password" placeholder="请输入密码" required>
+        </div>
+        <button class="btn btn-primary w-100 mb-3" type="submit">注册</button>
+    </form>
+    <div class="text-center">
+        <a href="/login">已有账号？登录</a>
+    </div>
+</div>
+</body>
+</html>

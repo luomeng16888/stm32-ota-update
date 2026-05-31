@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}版本推送 - OTA管理平台{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb-bar"><a href="/admin">仪表盘</a><span>/</span><span>版本推送</span></div>
+    <h4>版本推送管理</h4>
+    <div class="sub">推送固件/模型更新到设备，管理差分补丁</div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card mb-4 anim-1">
+            <div class="card-header"><div class="card-header-icon blue">🚀</div><span>推送更新</span></div>
+            <div class="card-body">
+                <form action="/admin/push/send" method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">目标设备</label>
+                        {% if devices %}
+                        <div class="device-checklist">
+                            <div class="form-check mb-2" style="border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:6px;">
+                                <input class="form-check-input" type="checkbox" id="select_all" onclick="document.querySelectorAll('.dev-cb').forEach(c=>c.checked=this.checked);">
+                                <label class="form-check-label fw-bold" for="select_all" style="font-size:0.82rem;">全选设备</label>
+                            </div>
+                            {% for d in devices %}
+                            <div class="form-check">
+                                <input class="form-check-input dev-cb" type="checkbox" name="device_ids" value="{{ d.id }}" id="dev_{{ d.id }}">
+                                <label class="form-check-label" for="dev_{{ d.id }}" style="font-size:0.85rem;">
+                                    <span class="status-dot {{ 'online' if d.is_online else 'offline' }}"></span>{{ d.device_id }}
+                                    <span class="dev-info">固件v{{ d.current_sys_version }} 模型v{{ d.current_model_version }}</span>
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="empty-state" style="padding:20px;"><div class="empty-text">暂无注册设备</div></div>
+                        {% endif %}
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">推送类型</label>
+                            <select class="form-select" name="push_type" id="push_type" onchange="updateVersionList()">
+                                <option value="firmware">固件</option><option value="model">模型</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">目标版本</label>
+                            <select class="form-select" name="version" id="push_version">
+                                {% for fw in firmwares %}<option value="{{ fw.version }}" data-type="firmware">v{{ fw.version }} ({{ '%.1f' | format(fw.file_size/1024) }}KB)</option>{% endfor %}
+                                {% for m in models %}<option value="{{ m.version }}" data-type="model">v{{ m.version }} ({{ '%.1f' | format(m.file_size/1024) }}KB)</option>{% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">更新方式</label>
+                        <select class="form-select" name="update_mode"><option value="full">全量更新</option><option value="diff">差分更新</option></select>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100" onclick="return confirm('确认推送更新？')">确认推送</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mb-4 anim-2">
+            <div class="card-header"><div class="card-header-icon orange">🔧</div><span>生成差分补丁</span></div>
+            <div class="card-body">
+                <form action="/admin/patch/generate" method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">补丁类型</label>
+                        <select class="form-select" name="patch_type" id="patch_type" onchange="updatePatchVersions()">
+                            <option value="firmware">固件</option><option value="model">模型</option>
+                        </select>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">起始版本</label>
+                            <select class="form-select" name="from_version" id="patch_from">
+                                {% for fw in firmwares %}<option value="{{ fw.version }}" data-type="firmware">v{{ fw.version }}</option>{% endfor %}
+                                {% for m in models %}<option value="{{ m.version }}" data-type="model">v{{ m.version }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">目标版本</label>
+                            <select class="form-select" name="to_version" id="patch_to">
+                                {% for fw in firmwares %}<option value="{{ fw.version }}" data-type="firmware">v{{ fw.version }}</option>{% endfor %}
+                                {% for m in models %}<option value="{{ m.version }}" data-type="model">v{{ m.version }}</option>{% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-warning w-100" onclick="return confirm('确认生成补丁？')">生成补丁</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card mb-4 anim-3">
+            <div class="card-header"><div class="card-header-icon purple">📄</div><span>已生成的补丁</span><span class="count-badge">{{ patches | length }}</span></div>
+            <div class="card-body p-0">
+                {% if patches %}
+                <table class="table table-hover mb-0">
+                    <thead><tr><th>类型</th><th>起始</th><th></th><th>目标</th><th>大小</th><th>操作</th></tr></thead>
+                    <tbody>
+                    {% for p in patches %}
+                    <tr>
+                        <td>{% if p.patch_type == 'firmware' %}<span class="badge badge-firmware">固件</span>{% else %}<span class="badge badge-model">模型</span>{% endif %}</td>
+                        <td><span class="ver-text">v{{ p.from_version }}</span></td>
+                        <td><span class="ver-arrow">→</span></td>
+                        <td><span class="ver-text">v{{ p.to_version }}</span></td>
+                        <td><span class="size-text">{{ '%.1f' | format(p.file_size / 1024) }} KB</span></td>
+                        <td>
+                            <form action="/admin/patch/delete/{{ p.id }}" method="POST" style="display:inline;">
+                                <button class="btn btn-outline-danger btn-sm" type="submit" onclick="return confirm('确认删除？')">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty-state"><div class="empty-icon">📄</div><div class="empty-text">暂无补丁文件</div><div class="empty-hint">在左侧选择版本后点击"生成补丁"</div></div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card mb-4 anim-4">
+            <div class="card-header"><div class="card-header-icon cyan">📜</div><span>推送历史</span><span class="count-badge">{{ push_history | length }}</span></div>
+            <div class="card-body p-0">
+                {% if push_history %}
+                <table class="table table-hover mb-0">
+                    <thead><tr><th>设备</th><th>类型</th><th>版本</th><th>模式</th><th>状态</th><th>时间</th></tr></thead>
+                    <tbody>
+                    {% for h in push_history %}
+                    <tr>
+                        <td><span style="font-family:var(--font-mono);font-size:0.82rem;">{{ h.device.device_id if h.device else '—' }}</span></td>
+                        <td>{% if h.push_type == 'firmware' %}<span class="badge badge-firmware">固件</span>{% else %}<span class="badge badge-model">模型</span>{% endif %}</td>
+                        <td><span class="ver-text">v{{ h.version }}</span></td>
+                        <td>{% if h.update_mode == 'full' %}<span class="badge badge-full">全量</span>{% else %}<span class="badge badge-diff">差分</span>{% endif %}</td>
+                        <td>{% if h.status == 'pending' %}<span class="badge badge-pending">等待中</span>{% elif h.status == 'success' %}<span class="badge badge-success">成功</span>{% elif h.status == 'failed' %}<span class="badge badge-failed">失败</span>{% else %}<span class="badge" style="background:#f1f5f9;color:#64748b">{{ h.status }}</span>{% endif %}</td>
+                        <td><span class="time-text">{{ h.created_at.strftime('%m-%d %H:%M') }}</span></td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty-state"><div class="empty-icon">📜</div><div class="empty-text">暂无推送记录</div></div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function updateVersionList(){var t=document.getElementById('push_type').value,s=document.getElementById('push_version'),o=s.options,f=-1;for(var i=0;i<o.length;i++){var d=o[i].getAttribute('data-type');if(d===t){o[i].style.display='';if(f<0)f=i}else o[i].style.display='none'}if(f>=0)s.selectedIndex=f}
+function updatePatchVersions(){var t=document.getElementById('patch_type').value;['patch_from','patch_to'].forEach(function(id){var s=document.getElementById(id),o=s.options,f=-1;for(var i=0;i<o.length;i++){var d=o[i].getAttribute('data-type');if(d===t){o[i].style.display='';if(f<0)f=i}else o[i].style.display='none'}if(f>=0)s.selectedIndex=f})}
+document.addEventListener('DOMContentLoaded',function(){updateVersionList();updatePatchVersions()});
+</script>
+{% endblock %}

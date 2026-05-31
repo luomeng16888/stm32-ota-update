@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 - OTA管理平台</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+    --accent:#3b82f6;
+    --accent-light:rgba(59,130,246,0.08);
+    --bg:#f5f6fa;
+    --card:#ffffff;
+    --border:#e8ecf1;
+    --text-primary:#1e293b;
+    --text-secondary:#64748b;
+    --text-muted:#94a3b8;
+    --danger:#ef4444;
+    --purple:#8b5cf6;
+    --radius:16px;
+    --radius-sm:10px;
+    --font-body:'Noto Sans SC',system-ui,-apple-system,sans-serif;
+    --font-mono:'JetBrains Mono','Menlo',monospace;
+}
+
+html,body{
+    width:100%;
+    height:100%;
+    margin:0;
+    padding:0;
+}
+
+body{
+    background:var(--bg);
+    font-family:var(--font-body);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+    position:relative;
+}
+
+/* 背景装饰 */
+body::before{
+    content:'';
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    z-index:0;
+    background:
+        radial-gradient(ellipse 700px 500px at 25% 45%,rgba(59,130,246,.06),transparent),
+        radial-gradient(ellipse 600px 400px at 75% 25%,rgba(139,92,246,.05),transparent),
+        radial-gradient(ellipse 500px 500px at 50% 85%,rgba(6,182,212,.04),transparent);
+}
+
+/* 噪点纹理 */
+body::after{
+    content:'';
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    z-index:0;
+    opacity:.02;
+    background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 登录卡片容器 */
+.login-wrapper{
+    position:relative;
+    z-index:1;
+    width:100%;
+    max-width:420px;
+    padding:0 20px;
+}
+
+/* 登录卡片 */
+.login-card{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:44px 36px 36px;
+    box-shadow:0 8px 40px rgba(0,0,0,0.06),0 1px 3px rgba(0,0,0,0.04);
+    animation:cardIn 0.5s cubic-bezier(.22,1,.36,1) both;
+}
+
+@keyframes cardIn{
+    from{opacity:0;transform:translateY(20px) scale(0.98)}
+    to{opacity:1;transform:translateY(0) scale(1)}
+}
+
+/* Logo */
+.logo{
+    width:56px;
+    height:56px;
+    border-radius:16px;
+    background:linear-gradient(135deg,var(--accent),var(--purple));
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:24px;
+    font-weight:800;
+    color:#fff;
+    margin:0 auto 24px;
+    box-shadow:0 0 28px rgba(59,130,246,0.25);
+    position:relative;
+    overflow:hidden;
+}
+
+.logo::after{
+    content:'';
+    position:absolute;
+    top:-50%;
+    left:-50%;
+    width:200%;
+    height:200%;
+    background:linear-gradient(45deg,transparent 30%,rgba(255,255,255,.1) 50%,transparent 70%);
+    animation:shimmer 3s ease-in-out infinite;
+}
+
+@keyframes shimmer{
+    0%,100%{transform:translate(-100%,-100%)}
+    50%{transform:translate(100%,100%)}
+}
+
+/* 标题 */
+.login-title{
+    text-align:center;
+    font-weight:700;
+    font-size:1.35rem;
+    color:var(--text-primary);
+    margin-bottom:4px;
+    letter-spacing:-0.01em;
+}
+
+.login-sub{
+    text-align:center;
+    color:var(--text-muted);
+    font-size:0.85rem;
+    margin-bottom:32px;
+}
+
+/* 表单 */
+.form-group{
+    margin-bottom:20px;
+}
+
+.form-label{
+    display:block;
+    font-weight:600;
+    font-size:0.82rem;
+    color:var(--text-secondary);
+    margin-bottom:8px;
+    letter-spacing:0.01em;
+}
+
+.form-input{
+    width:100%;
+    padding:12px 16px;
+    border:1px solid var(--border);
+    border-radius:var(--radius-sm);
+    font-size:0.9rem;
+    font-family:var(--font-body);
+    color:var(--text-primary);
+    background:var(--card);
+    transition:all 0.2s ease;
+    outline:none;
+    line-height:1.5;
+}
+
+.form-input::placeholder{
+    color:var(--text-muted);
+}
+
+.form-input:focus{
+    border-color:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-light);
+}
+
+.form-input:hover:not(:focus){
+    border-color:#cbd5e1;
+}
+
+/* 按钮 */
+.btn-login{
+    width:100%;
+    padding:12px;
+    border:none;
+    border-radius:var(--radius-sm);
+    background:linear-gradient(135deg,var(--accent),#2563eb);
+    color:#fff;
+    font-weight:600;
+    font-size:0.92rem;
+    font-family:var(--font-body);
+    cursor:pointer;
+    transition:all 0.25s ease;
+    box-shadow:0 2px 10px rgba(59,130,246,0.3);
+    letter-spacing:0.01em;
+    margin-top:4px;
+}
+
+.btn-login:hover{
+    background:linear-gradient(135deg,#2563eb,#1d4ed8);
+    box-shadow:0 4px 18px rgba(59,130,246,0.4);
+    transform:translateY(-1px);
+}
+
+.btn-login:active{
+    transform:translateY(0) scale(0.98);
+    box-shadow:0 1px 4px rgba(59,130,246,0.3);
+}
+
+/* 提示消息 */
+.alert{
+    padding:12px 16px;
+    border-radius:var(--radius-sm);
+    font-size:0.85rem;
+    font-weight:500;
+    margin-bottom:20px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    animation:fadeDown 0.3s ease both;
+}
+
+@keyframes fadeDown{
+    from{opacity:0;transform:translateY(-8px)}
+    to{opacity:1;transform:translateY(0)}
+}
+
+.alert-error{
+    background:rgba(239,68,68,0.06);
+    color:var(--danger);
+    border:1px solid rgba(239,68,68,0.12);
+    border-left:4px solid var(--danger);
+}
+
+.alert-info{
+    background:var(--accent-light);
+    color:var(--accent);
+    border:1px solid rgba(59,130,246,0.12);
+    border-left:4px solid var(--accent);
+}
+
+.alert-success{
+    background:rgba(34,197,94,0.06);
+    color:#15803d;
+    border:1px solid rgba(34,197,94,0.12);
+    border-left:4px solid #22c55e;
+}
+
+/* 关闭按钮 */
+.alert-dismiss{
+    margin-left:auto;
+    background:none;
+    border:none;
+    color:inherit;
+    cursor:pointer;
+    font-size:1.1rem;
+    opacity:0.5;
+    padding:0 4px;
+    line-height:1;
+    transition:opacity 0.2s;
+}
+
+.alert-dismiss:hover{
+    opacity:1;
+}
+
+/* 注册链接 */
+.register-link{
+    text-align:center;
+    margin-top:24px;
+    padding-top:20px;
+    border-top:1px solid var(--border);
+}
+
+.register-link a{
+    color:var(--accent);
+    text-decoration:none;
+    font-size:0.85rem;
+    font-weight:500;
+    transition:all 0.2s;
+}
+
+.register-link a:hover{
+    color:#2563eb;
+    text-decoration:underline;
+}
+
+/* 底部版权 */
+.footer{
+    text-align:center;
+    margin-top:20px;
+    font-size:0.72rem;
+    color:var(--text-muted);
+    letter-spacing:0.02em;
+}
+
+/* 响应式 */
+@media(max-width:480px){
+    .login-card{
+        padding:32px 24px 28px;
+    }
+    .logo{
+        width:48px;
+        height:48px;
+        font-size:20px;
+    }
+    .login-title{
+        font-size:1.2rem;
+    }
+}
+</style>
+</head>
+<body>
+
+<div class="login-wrapper">
+    <div class="login-card">
+        <div class="logo">O</div>
+        <div class="login-title">OTA 管理平台</div>
+        <div class="login-sub">请登录以继续</div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, msg in messages %}
+        {% if category == 'info' %}
+        <div class="alert alert-info" id="alert-{{ loop.index }}">
+            <span>{{ msg }}</span>
+            <button class="alert-dismiss" onclick="this.parentElement.style.display='none'">&times;</button>
+        </div>
+        {% elif category == 'success' %}
+        <div class="alert alert-success" id="alert-{{ loop.index }}">
+            <span>{{ msg }}</span>
+            <button class="alert-dismiss" onclick="this.parentElement.style.display='none'">&times;</button>
+        </div>
+        {% else %}
+        <div class="alert alert-error" id="alert-{{ loop.index }}">
+            <span>{{ msg }}</span>
+            <button class="alert-dismiss" onclick="this.parentElement.style.display='none'">&times;</button>
+        </div>
+        {% endif %}
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="/login">
+            <div class="form-group">
+                <label class="form-label" for="username">用户名</label>
+                <input class="form-input" type="text" id="username" name="username"
+                       placeholder="请输入用户名" required autofocus autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="password">密码</label>
+                <input class="form-input" type="password" id="password" name="password"
+                       placeholder="请输入密码" required autocomplete="current-password">
+            </div>
+            <button class="btn-login" type="submit">登录</button>
+        </form>
+
+        <div class="register-link">
+            <a href="/register">没有账号？去注册</a>
+        </div>
+    </div>
+
+    <div class="footer">OTA Firmware Management Platform</div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>我的反馈 - OTA管理平台</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--accent:#3b82f6;--accent-light:rgba(59,130,246,0.08);--bg:#f5f6fa;--card:#fff;--border:#e8ecf1;--text-primary:#1e293b;--text-secondary:#64748b;--text-muted:#94a3b8;--ok:#22c55e;--ok-light:rgba(34,197,94,0.08);--warn:#f59e0b;--warn-light:rgba(245,158,11,0.08);--purple:#8b5cf6;--radius:14px;--radius-sm:10px;--font-body:'Noto Sans SC',system-ui,sans-serif;--font-mono:'JetBrains Mono',monospace;--shadow-sm:0 1px 3px rgba(0,0,0,0.04);--shadow:0 4px 16px rgba(0,0,0,0.06)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);font-family:var(--font-body);-webkit-font-smoothing:antialiased}
+.topbar{background:var(--card);border-bottom:1px solid var(--border);padding:14px 32px;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--shadow-sm)}
+.topbar-left{display:flex;align-items:center;gap:12px}
+.logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--purple));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:#fff}
+.topbar h5{font-weight:700;font-size:1.05rem;margin:0}
+.topbar a{color:var(--text-muted);text-decoration:none;font-size:0.85rem;font-weight:500}a:hover{color:var(--accent)}
+.container{max-width:700px;margin:32px auto;padding:0 20px}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.card{border:1px solid var(--border);border-radius:var(--radius);background:var(--card);box-shadow:var(--shadow-sm);overflow:hidden;margin-bottom:16px;animation:fadeUp 0.4s ease both}
+.card-body{padding:18px 22px}
+.badge{font-weight:600;font-size:0.7rem;padding:4px 10px;border-radius:6px}
+.badge-pending{background:var(--warn-light);color:#b45309}.badge-success{background:var(--ok-light);color:#15803d}
+.btn{font-weight:600;font-size:0.85rem;border-radius:var(--radius-sm);padding:8px 18px;transition:all 0.25s;border:none}
+.btn-outline-primary{border:1px solid rgba(59,130,246,0.3);color:var(--accent);background:transparent}
+.btn-outline-primary:hover{background:var(--accent-light)}
+.empty-state{text-align:center;padding:40px 20px;color:var(--text-muted)}
+</style>
+</head>
+<body>
+<div class="topbar">
+    <div class="topbar-left"><div class="logo">O</div><h5>OTA 管理平台</h5></div>
+    <div style="display:flex;gap:16px;"><a href="/user">我的设备</a><a href="/logout">退出</a></div>
+</div>
+<div class="container">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <h4 style="font-weight:700;">我的反馈</h4>
+        <a href="/user/feedback" class="btn btn-outline-primary">提交新反馈</a>
+    </div>
+    {% if feedbacks %}
+    {% for fb in feedbacks %}
+    <div class="card" style="animation-delay:{{ loop.index * 0.05 }}s;">
+        <div class="card-body">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <strong>{{ fb.subject }}</strong>
+                {% if fb.status == 'unread' %}<span class="badge badge-pending">待回复</span>
+                {% elif fb.status == 'replied' %}<span class="badge badge-success">已回复</span>{% endif %}
+                <span style="margin-left:auto;font-size:0.78rem;color:var(--text-muted);">{{ fb.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+            </div>
+            <div style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:10px;">{{ fb.content }}</div>
+            {% if fb.reply %}
+            <div style="background:var(--ok-light);padding:10px 14px;border-radius:var(--radius-sm);font-size:0.85rem;">
+                <strong style="color:var(--ok)">管理员回复：</strong> {{ fb.reply }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="card"><div class="empty-state"><div style="font-size:2rem;margin-bottom:8px;opacity:0.3;">💬</div><div>暂无反馈记录</div></div></div>
+    {% endif %}
+</div>
+</body>
+</html>

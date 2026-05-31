@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>我的设备 - OTA管理平台</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--accent:#3b82f6;--accent-light:rgba(59,130,246,0.08);--bg:#f5f6fa;--card:#fff;--border:#e8ecf1;--text-primary:#1e293b;--text-secondary:#64748b;--text-muted:#94a3b8;--ok:#22c55e;--ok-light:rgba(34,197,94,0.08);--warn:#f59e0b;--warn-light:rgba(245,158,11,0.08);--danger:#ef4444;--danger-light:rgba(239,68,68,0.08);--purple:#8b5cf6;--purple-light:rgba(139,92,246,0.08);--cyan:#06b6d4;--cyan-light:rgba(6,182,212,0.08);--radius:14px;--radius-sm:10px;--font-body:'Noto Sans SC',system-ui,sans-serif;--font-mono:'JetBrains Mono',monospace;--shadow-sm:0 1px 3px rgba(0,0,0,0.04);--shadow:0 4px 16px rgba(0,0,0,0.06)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);font-family:var(--font-body);-webkit-font-smoothing:antialiased}
+.topbar{background:var(--card);border-bottom:1px solid var(--border);padding:14px 32px;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--shadow-sm)}
+.topbar-left{display:flex;align-items:center;gap:12px}
+.logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--purple));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:#fff}
+.topbar h5{font-weight:700;font-size:1.05rem;margin:0}
+.topbar a{color:var(--text-muted);text-decoration:none;font-size:0.85rem;font-weight:500}
+.topbar a:hover{color:var(--accent)}
+.container{max-width:1000px;margin:32px auto;padding:0 20px}
+.page-header{margin-bottom:24px;animation:fadeUp 0.4s ease both}
+.page-header h4{font-weight:700;font-size:1.3rem;margin-bottom:4px}
+.page-header .sub{color:var(--text-muted);font-size:0.85rem}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.card{border:1px solid var(--border);border-radius:var(--radius);background:var(--card);box-shadow:var(--shadow-sm);transition:all 0.3s;overflow:hidden;margin-bottom:16px}
+.card:hover{box-shadow:var(--shadow)}
+.card-header{padding:14px 22px;border-bottom:1px solid var(--border);font-weight:600;font-size:0.95rem;display:flex;align-items:center;gap:10px;border-radius:var(--radius) var(--radius) 0 0}
+.card-header-icon{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:0.85rem;flex-shrink:0}
+.card-header-icon.blue{background:var(--accent-light);color:var(--accent)}
+.card-header-icon.green{background:var(--ok-light);color:var(--ok)}
+.card-header-icon.purple{background:var(--purple-light);color:var(--purple)}
+.card-header-icon.cyan{background:var(--cyan-light);color:var(--cyan)}
+.card-header .count-badge{margin-left:auto;background:var(--accent-light);color:var(--accent);font-size:0.72rem;font-weight:600;padding:2px 10px;border-radius:12px;font-family:var(--font-mono)}
+.card-body{padding:18px 22px}
+.btn{font-weight:600;font-size:0.85rem;border-radius:var(--radius-sm);padding:8px 18px;transition:all 0.25s;border:none;cursor:pointer}
+.btn:active{transform:scale(0.97)}
+.btn-primary{background:linear-gradient(135deg,var(--accent),#2563eb);color:#fff;box-shadow:0 2px 8px rgba(59,130,246,0.3)}
+.btn-primary:hover{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;transform:translateY(-1px);box-shadow:0 4px 16px rgba(59,130,246,0.4)}
+.btn-success{background:linear-gradient(135deg,var(--ok),#16a34a);color:#fff;box-shadow:0 2px 8px rgba(34,197,94,0.3)}
+.btn-success:hover{background:linear-gradient(135deg,#16a34a,#15803d);color:#fff;transform:translateY(-1px)}
+.btn-outline-danger{border:1px solid rgba(239,68,68,0.3);color:var(--danger);background:transparent}
+.btn-outline-danger:hover{background:var(--danger-light);border-color:var(--danger)}
+.btn-outline-primary{border:1px solid rgba(59,130,246,0.3);color:var(--accent);background:transparent}
+.btn-outline-primary:hover{background:var(--accent-light);border-color:var(--accent)}
+.btn-sm{padding:5px 14px;font-size:0.76rem;border-radius:8px}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.status-dot.online{background:var(--ok);box-shadow:0 0 6px rgba(34,197,94,0.5)}
+.status-dot.offline{background:var(--text-muted);opacity:0.5}
+.alert{border:none;border-radius:var(--radius-sm);font-size:0.88rem;font-weight:500;padding:14px 18px;margin-bottom:20px}
+.alert-info{background:var(--accent-light);color:var(--accent);border-left:4px solid var(--accent)}
+.empty-state{text-align:center;padding:40px 20px;color:var(--text-muted)}
+.ver-text{font-family:var(--font-mono);font-weight:500;font-size:0.88rem}
+.size-text{font-family:var(--font-mono);font-size:0.8rem;color:var(--text-secondary)}
+.time-text{font-size:0.78rem;color:var(--text-muted)}
+.badge{font-weight:600;font-size:0.7rem;padding:4px 10px;border-radius:6px}
+.badge-active{background:var(--ok-light);color:#15803d}
+.badge-latest{background:var(--accent-light);color:var(--accent)}
+.badge-model{background:var(--cyan-light);color:var(--cyan)}
+.table{margin-bottom:0;font-size:0.85rem}
+.table thead th{background:#f8f9fb;font-weight:600;font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;padding:10px 16px;border-bottom:1px solid var(--border)}
+.table tbody td{padding:12px 16px;vertical-align:middle;border-bottom:1px solid #f1f3f6}
+.table tbody tr{transition:background 0.15s}
+.table tbody tr:hover{background:#f8f9fc}
+.table tbody tr:last-child td{border-bottom:none}
+.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}
+.stat-box{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;text-align:center;transition:all 0.3s}
+.stat-box:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow)}
+.stat-box .val{font-family:var(--font-mono);font-size:1.5rem;font-weight:500}
+.stat-box .lbl{font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;margin-top:2px}
+.download-progress{height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:8px;display:none}
+.download-progress .bar{height:100%;background:linear-gradient(90deg,var(--accent),var(--ok));border-radius:2px;width:0;transition:width 0.3s}
+</style>
+</head>
+<body>
+<div class="topbar">
+    <div class="topbar-left"><div class="logo">O</div><h5>OTA 管理平台</h5></div>
+    <div style="display:flex;gap:16px;align-items:center;">
+        <span style="color:var(--text-secondary);font-size:0.85rem;">{{ current_user.username }}</span>
+        <a href="/user/feedback/list">我的反馈</a>
+        <a href="/user/feedback">提交反馈</a>
+        <a href="/logout">退出登录</a>
+    </div>
+</div>
+<div class="container">
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}{% for msg in messages %}<div class="alert alert-info">{{ msg }}</div>{% endfor %}{% endif %}
+    {% endwith %}
+
+    <div class="page-header">
+        <h4>我的设备</h4>
+        <div class="sub">管理设备、查看固件和模型更新</div>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="stat-row">
+        <div class="stat-box">
+            <div class="val" style="color:var(--accent)">{{ devices | length }}</div>
+            <div class="lbl">我的设备</div>
+        </div>
+        <div class="stat-box">
+            <div class="val" style="color:var(--ok)">{{ devices | selectattr('is_online') | list | length }}</div>
+            <div class="lbl">在线设备</div>
+        </div>
+        <div class="stat-box">
+            <div class="val" style="color:var(--purple)">{{ latest_firmware.version if latest_firmware else '---' }}</div>
+            <div class="lbl">最新固件</div>
+        </div>
+    </div>
+
+    <!-- 设备列表 -->
+    <div class="card" style="animation:fadeUp 0.4s ease both;animation-delay:0.1s;">
+        <div class="card-header">
+            <div class="card-header-icon blue">📡</div>
+            <span>我的设备</span>
+            <span class="count-badge">{{ devices | length }}</span>
+        </div>
+        <div class="card-body p-0">
+            {% if devices %}
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>设备ID</th>
+                        <th>型号</th>
+                        <th>固件版本</th>
+                        <th>模型版本</th>
+                        <th>WiFi</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for d in devices %}
+                <tr>
+                    <td>
+                        <span class="status-dot {{ 'online' if d.is_online else 'offline' }}"></span>
+                        <strong>{{ d.device_id }}</strong>
+                    </td>
+                    <td style="font-size:0.82rem;color:var(--text-secondary)">{{ d.device_model }}</td>
+                    <td>
+                        <span class="ver-text">v{{ d.current_sys_version }}</span>
+                        {% if latest_firmware and d.current_sys_version != latest_firmware.version %}
+                        <span class="badge badge-latest" style="margin-left:4px;">可更新</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="ver-text">v{{ d.current_model_version }}</span>
+                        {% if latest_model and d.current_model_version != latest_model.version %}
+                        <span class="badge badge-latest" style="margin-left:4px;">可更新</span>
+                        {% endif %}
+                    </td>
+                    <td style="font-size:0.82rem;">{{ d.wifi_ssid or '未配置' }}</td>
+                    <td>
+                        {% if d.is_online %}<span class="badge badge-active">在线</span>
+                        {% else %}<span class="badge" style="background:#f1f5f9;color:#64748b">离线</span>{% endif %}
+                    </td>
+                    <td>
+                        <div style="display:flex;gap:4px;">
+                            <a href="/user/device/{{ d.id }}/wifi" class="btn btn-outline-primary btn-sm">WiFi</a>
+                            <form action="/user/device/delete/{{ d.id }}" method="POST" style="display:inline;">
+                                <button class="btn btn-outline-danger btn-sm" type="submit" onclick="return confirm('确认删除？')">删除</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <div style="font-size:2rem;margin-bottom:8px;opacity:0.3;">📡</div>
+                <div>暂无设备，点击下方按钮添加</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div style="margin-bottom:24px;">
+        <a href="/user/device/add" class="btn btn-primary">添加设备</a>
+    </div>
+
+    <!-- 最新固件版本 -->
+    <div class="card" style="animation:fadeUp 0.4s ease both;animation-delay:0.15s;">
+        <div class="card-header">
+            <div class="card-header-icon green">📦</div>
+            <span>最新固件版本</span>
+            <span class="count-badge">{{ firmwares | length }}</span>
+        </div>
+        <div class="card-body p-0">
+            {% if firmwares %}
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>版本</th>
+                        <th>型号</th>
+                        <th>大小</th>
+                        <th>MD5</th>
+                        <th>状态</th>
+                        <th>发布时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for fw in firmwares %}
+                <tr>
+                    <td>
+                        <span class="ver-text">v{{ fw.version }}</span>
+                        {% if loop.first %}<span class="badge badge-active" style="margin-left:4px;">最新</span>{% endif %}
+                    </td>
+                    <td style="font-size:0.82rem;color:var(--text-secondary)">{{ fw.device_model }}</td>
+                    <td><span class="size-text">{{ '%.1f' | format(fw.file_size / 1024) }} KB</span></td>
+                    <td><span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted)">{{ fw.file_md5[:16] }}...</span></td>
+                    <td>
+                        {% if fw.is_active %}<span class="badge badge-active">已发布</span>
+                        {% else %}<span class="badge" style="background:#f1f5f9;color:#64748b">未发布</span>{% endif %}
+                    </td>
+                    <td><span class="time-text">{{ fw.created_at.strftime('%Y-%m-%d %H:%M') }}</span></td>
+                    <td>
+                        {% if fw.is_active %}
+                        <button class="btn btn-success btn-sm" onclick="downloadFirmware('{{ fw.version }}', '{{ fw.filename }}', {{ fw.file_size }})">
+                            下载
+                        </button>
+                        {% else %}
+                        <span style="color:var(--text-muted);font-size:0.78rem;">不可用</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <div style="font-size:2rem;margin-bottom:8px;opacity:0.3;">📦</div>
+                <div>暂无可用固件</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 最新模型版本 -->
+    <div class="card" style="animation:fadeUp 0.4s ease both;animation-delay:0.2s;">
+        <div class="card-header">
+            <div class="card-header-icon purple">🧠</div>
+            <span>最新模型版本</span>
+            <span class="count-badge">{{ models | length }}</span>
+        </div>
+        <div class="card-body p-0">
+            {% if models %}
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>版本</th>
+                        <th>模型名称</th>
+                        <th>大小</th>
+                        <th>MD5</th>
+                        <th>说明</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for m in models %}
+                <tr>
+                    <td>
+                        <span class="ver-text">v{{ m.version }}</span>
+                        {% if loop.first %}<span class="badge badge-model" style="margin-left:4px;">最新</span>{% endif %}
+                    </td>
+                    <td style="font-size:0.85rem;">{{ m.model_name or '—' }}</td>
+                    <td><span class="size-text">{{ '%.1f' | format(m.file_size / 1024) }} KB</span></td>
+                    <td><span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted)">{{ m.file_md5[:16] }}...</span></td>
+                    <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.82rem;color:var(--text-secondary);">{{ m.description or '—' }}</td>
+                    <td>
+                        {% if m.is_active %}<span class="badge badge-active">已发布</span>
+                        {% else %}<span class="badge" style="background:#f1f5f9;color:#64748b">未发布</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if m.is_active %}
+                        <button class="btn btn-success btn-sm" onclick="downloadModel('{{ m.version }}', '{{ m.filename }}', {{ m.file_size }})">
+                            下载
+                        </button>
+                        {% else %}
+                        <span style="color:var(--text-muted);font-size:0.78rem;">不可用</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <div style="font-size:2rem;margin-bottom:8px;opacity:0.3;">🧠</div>
+                <div>暂无可用模型</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+function downloadFirmware(version, filename, totalSize) {
+    downloadFile('firmware', version, filename, totalSize);
+}
+
+function downloadModel(version, filename, totalSize) {
+    downloadFile('model', version, filename, totalSize);
+}
+
+function downloadFile(type, version, filename, totalSize) {
+    if (!confirm('下载 ' + type + ' v' + version + ' (' + (totalSize/1024).toFixed(1) + 'KB)？')) return;
+
+    var CHUNK_SIZE = 4096;
+    var offset = 0;
+    var chunks = [];
+    var startTime = Date.now();
+
+    function fetchChunk() {
+        fetch('/api/user/download', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                type: type,
+                version: version,
+                offset: offset,
+                length: CHUNK_SIZE
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.code !== 200) {
+                alert('Download failed: ' + (data.message || 'error'));
+                return;
+            }
+
+            var hex = data.data;
+            var bytes = new Uint8Array(hex.length / 2);
+            for (var i = 0; i < hex.length; i += 2) {
+                bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+            }
+            chunks.push(bytes);
+            offset += data.chunk_size;
+
+            var pct = Math.round(offset / totalSize * 100);
+            document.title = 'Downloading... ' + pct + '%';
+
+            if (offset < totalSize) {
+                fetchChunk();
+            } else {
+                var blob = new Blob(chunks);
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                document.title = 'OTA 管理平台';
+                alert('下载完成！\n文件: ' + filename + '\n大小: ' + (totalSize/1024).toFixed(1) + 'KB\n耗时: ' + elapsed + 's');
+            }
+        })
+        .catch(function(e) {
+            alert('Download error: ' + e.message);
+        });
+    }
+
+    fetchChunk();
+}
+</script>
+</body>
+</html>

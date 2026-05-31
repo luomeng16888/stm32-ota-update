@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}服务器日志{% endblock %}
+{% block content %}
+<h1 style="margin-bottom:20px">服务器日志</h1>
+<div class="card">
+    <div style="margin-bottom:12px">
+        <a href="{{ url_for('admin_logs') }}" class="btn btn-sm {% if not level_filter %}btn-primary{% else %}btn-info{% endif %}">全部</a>
+        <a href="{{ url_for('admin_logs', level='INFO') }}" class="btn btn-sm {% if level_filter=='INFO' %}btn-primary{% else %}btn-info{% endif %}">INFO</a>
+        <a href="{{ url_for('admin_logs', level='WARNING') }}" class="btn btn-sm {% if level_filter=='WARNING' %}btn-primary{% else %}btn-warning{% endif %}">WARNING</a>
+        <a href="{{ url_for('admin_logs', level='ERROR') }}" class="btn btn-sm {% if level_filter=='ERROR' %}btn-primary{% else %}btn-danger{% endif %}">ERROR</a>
+    </div>
+    <table>
+        <tr><th>时间</th><th>级别</th><th>模块</th><th>设备</th><th>IP</th><th>消息</th></tr>
+        {% for log in logs %}
+        <tr>
+            <td>{{ log.created_at.strftime('%m-%d %H:%M:%S') }}</td>
+            <td><span class="badge {% if log.level=='ERROR' %}badge-danger{% elif log.level=='WARNING' %}badge-warning{% else %}badge-info{% endif %}">{{ log.level }}</span></td>
+            <td>{{ log.module }}</td>
+            <td>{{ log.device_id }}</td>
+            <td>{{ log.ip_address }}</td>
+            <td>{{ log.message }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endblock %}

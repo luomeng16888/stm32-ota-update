@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}固件管理 - OTA管理平台{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb-bar"><a href="/admin">仪表盘</a><span>/</span><span>固件管理</span></div>
+    <h4>固件管理</h4>
+    <div class="sub">上传、发布和管理设备固件</div>
+</div>
+
+<div class="card mb-4 anim-1">
+    <div class="card-header">
+        <div class="card-header-icon blue">📤</div><span>上传新固件</span>
+    </div>
+    <div class="card-body">
+        <form action="/admin/firmware/upload" method="POST" enctype="multipart/form-data">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">版本号</label>
+                    <input class="form-control" name="version" placeholder="如 1.0.5" required>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">设备型号</label>
+                    <input class="form-control" name="device_model" value="STM32F407ZGT6">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">固件文件 (.bin)</label>
+                    <input class="form-control" type="file" name="firmware" accept=".bin" required>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-primary w-100">上传固件</button>
+                </div>
+            </div>
+            <div class="mt-3">
+                <label class="form-label">更新说明</label>
+                <input class="form-control" name="release_notes" placeholder="本次更新的内容说明...">
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card anim-2">
+    <div class="card-header">
+        <div class="card-header-icon orange">📦</div><span>固件列表</span>
+        <span class="count-badge">{{ firmwares | length }}</span>
+    </div>
+    <div class="card-body p-0">
+        {% if firmwares %}
+        <table class="table table-hover mb-0">
+            <thead><tr><th>版本</th><th>型号</th><th>大小</th><th>MD5</th><th>状态</th><th>上传时间</th><th>操作</th></tr></thead>
+            <tbody>
+            {% for fw in firmwares %}
+            <tr>
+                <td><span class="ver-text">v{{ fw.version }}</span></td>
+                <td><span style="font-size:0.8rem;color:var(--text-secondary)">{{ fw.device_model }}</span></td>
+                <td><span class="size-text">{{ '%.1f' | format(fw.file_size/1024) }} KB</span></td>
+                <td><span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted)">{{ fw.file_md5[:12] }}...</span></td>
+                <td>{% if fw.is_active %}<span class="badge badge-success">已发布</span>{% else %}<span class="badge" style="background:#f1f5f9;color:#64748b">未发布</span>{% endif %}</td>
+                <td><span class="time-text">{{ fw.created_at.strftime('%m-%d %H:%M') }}</span></td>
+                <td>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                        {% if not fw.is_active %}
+                        <form action="/admin/firmware/publish/{{ fw.id }}" method="POST" style="display:inline;">
+                            <button class="btn btn-sm btn-success" type="submit">发布</button>
+                        </form>
+                        {% else %}
+                        <form action="/admin/firmware/unpublish/{{ fw.id }}" method="POST" style="display:inline;">
+                            <button class="btn btn-sm btn-outline-primary" type="submit">撤销</button>
+                        </form>
+                        {% endif %}
+                        <form action="/admin/firmware/delete/{{ fw.id }}" method="POST" style="display:inline;">
+                            <button class="btn btn-sm btn-outline-danger" type="submit" onclick="return confirm('确认删除 v{{ fw.version }}？')">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">暂无固件，请上传第一个版本</div></div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

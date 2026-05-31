@@ -1,0 +1,4 @@
+..\..\output\ffunicode_1.o: ..\..\Middlewares\FATFS\source\ffunicode.c
+..\..\output\ffunicode_1.o: ..\..\Middlewares\FATFS\source\ff.h
+..\..\output\ffunicode_1.o: ..\..\Middlewares\FATFS\source\ffconf.h
+..\..\output\ffunicode_1.o: C:\Users\Administrator\AppData\Local\Keil_v5\ARM\ARM_Compiler_5.06u7\Bin\..\include\stdint.h

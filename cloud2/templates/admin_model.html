@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}模型管理 - OTA管理平台{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb-bar"><a href="/admin">仪表盘</a><span>/</span><span>模型管理</span></div>
+    <h4>模型管理</h4>
+    <div class="sub">上传和管理 AI 模型文件</div>
+</div>
+
+<div class="card mb-4 anim-1">
+    <div class="card-header">
+        <div class="card-header-icon purple">📤</div><span>上传新模型</span>
+    </div>
+    <div class="card-body">
+        <form action="/admin/model/upload" method="POST" enctype="multipart/form-data">
+            <div class="row g-3">
+                <div class="col-md-2">
+                    <label class="form-label">版本号</label>
+                    <input class="form-control" name="version" placeholder="如 1.6" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">模型名称</label>
+                    <input class="form-control" name="model_name" placeholder="可选">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">设备型号</label>
+                    <input class="form-control" name="device_model" value="STM32F407ZGT6">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">模型文件</label>
+                    <input class="form-control" type="file" name="model_file" required>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-primary w-100">上传模型</button>
+                </div>
+            </div>
+            <div class="mt-3">
+                <label class="form-label">描述</label>
+                <input class="form-control" name="description" placeholder="模型说明...">
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card anim-2">
+    <div class="card-header">
+        <div class="card-header-icon cyan">🧠</div><span>模型列表</span>
+        <span class="count-badge">{{ models | length }}</span>
+    </div>
+    <div class="card-body p-0">
+        {% if models %}
+        <table class="table table-hover mb-0">
+            <thead><tr><th>版本</th><th>名称</th><th>大小</th><th>MD5</th><th>状态</th><th>上传时间</th><th>操作</th></tr></thead>
+            <tbody>
+            {% for m in models %}
+            <tr>
+                <td><span class="ver-text">v{{ m.version }}</span></td>
+                <td>{{ m.model_name or '—' }}</td>
+                <td><span class="size-text">{{ '%.1f' | format(m.file_size/1024) }} KB</span></td>
+                <td><span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted)">{{ m.file_md5[:12] }}...</span></td>
+                <td>{% if m.is_active %}<span class="badge badge-success">已发布</span>{% else %}<span class="badge" style="background:#f1f5f9;color:#64748b">未发布</span>{% endif %}</td>
+                <td><span class="time-text">{{ m.created_at.strftime('%m-%d %H:%M') }}</span></td>
+                <td>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                        {% if not m.is_active %}
+                        <form action="/admin/model/publish/{{ m.id }}" method="POST" style="display:inline;">
+                            <button class="btn btn-sm btn-success" type="submit">发布</button>
+                        </form>
+                        {% else %}
+                        <form action="/admin/model/unpublish/{{ m.id }}" method="POST" style="display:inline;">
+                            <button class="btn btn-sm btn-outline-primary" type="submit">撤销</button>
+                        </form>
+                        {% endif %}
+                        <form action="/admin/model/delete/{{ m.id }}" method="POST" style="display:inline;">
+                            <button class="btn btn-sm btn-outline-danger" type="submit" onclick="return confirm('确认删除 v{{ m.version }}？')">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state"><div class="empty-icon">🧠</div><div class="empty-text">暂无模型</div></div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

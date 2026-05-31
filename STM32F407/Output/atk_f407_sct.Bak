@@ -1,0 +1,29 @@
+LR_IROM1 0x08040000 0x00060000 {
+
+  ER_IROM1 0x08040000 0x00060000 {
+    *.o (RESET, +First)
+    *(InRoot$$Sections)
+    .ANY (+RO)
+    .ANY (+XO)
+  }
+
+  RW_IRAM1 0x20000000 0x00020000 {
+    errno.o (+RW +ZI)
+    .ANY (+RW +ZI)
+  }
+
+  RW_CCM 0x10000000 0x00010000 {
+    malloc.o(.bss.ARM.__at_0x10000000)
+    malloc.o(.bss.ARM.__at_0x10008000)
+  }
+
+  RW_EXTSRAM 0x68000000 0x00100000 {
+    malloc.o(.bss.ARM.__at_0x68000000)
+    malloc.o(.bss.ARM.__at_0x680F0C00)
+    network.o (+RW +ZI)
+    network_data.o (+RW +ZI)
+    network_data_params.o (+RW +ZI)
+    model_engine.o (+RW +ZI)
+    data_player.o (+RW +ZI)
+  }
+}

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 - OTA管理平台{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb-bar"><span>仪表盘</span></div>
+    <h4>系统概览</h4>
+    <div class="sub">实时监控平台运行状态</div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-md-3"><div class="stat-card anim-1">
+        <div class="stat-icon" style="background:var(--accent-light);color:var(--accent)">📡</div>
+        <div class="stat-label">设备总数</div>
+        <div class="stat-val" style="color:var(--accent)">{{ total_devices }}</div>
+    </div></div>
+    <div class="col-md-3"><div class="stat-card anim-2">
+        <div class="stat-icon" style="background:var(--ok-light);color:var(--ok)">⚡</div>
+        <div class="stat-label">在线设备</div>
+        <div class="stat-val" style="color:var(--ok)">{{ online_devices }}</div>
+    </div></div>
+    <div class="col-md-3"><div class="stat-card anim-3">
+        <div class="stat-icon" style="background:var(--purple-light);color:var(--purple)">👥</div>
+        <div class="stat-label">用户数量</div>
+        <div class="stat-val" style="color:var(--purple)">{{ total_users }}</div>
+    </div></div>
+    <div class="col-md-3"><div class="stat-card anim-4">
+        <div class="stat-icon" style="background:var(--warn-light);color:var(--warn)">📦</div>
+        <div class="stat-label">固件版本</div>
+        <div class="stat-val" style="color:var(--warn)">{{ firmwares | length }}</div>
+    </div></div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card anim-2">
+            <div class="card-header">
+                <div class="card-header-icon blue">📦</div><span>固件版本</span>
+                <span class="count-badge">{{ firmwares | length }}</span>
+            </div>
+            <div class="card-body p-0">
+                {% if firmwares %}
+                <table class="table table-hover mb-0">
+                    <thead><tr><th>版本</th><th>状态</th><th>大小</th><th>上传时间</th></tr></thead>
+                    <tbody>
+                    {% for fw in firmwares[:5] %}
+                    <tr>
+                        <td><span class="ver-text">v{{ fw.version }}</span></td>
+                        <td>{% if fw.is_active %}<span class="badge badge-success">已发布</span>{% else %}<span class="badge" style="background:#f1f5f9;color:#64748b">未发布</span>{% endif %}</td>
+                        <td><span class="size-text">{{ '%.1f' | format(fw.file_size/1024) }} KB</span></td>
+                        <td><span class="time-text">{{ fw.created_at.strftime('%m-%d %H:%M') }}</span></td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">暂无固件</div></div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card anim-3">
+            <div class="card-header">
+                <div class="card-header-icon cyan">📋</div><span>最近日志</span>
+            </div>
+            <div class="card-body p-0">
+                {% if recent_logs %}
+                <table class="table table-hover mb-0">
+                    <thead><tr><th>级别</th><th>模块</th><th>消息</th><th>时间</th></tr></thead>
+                    <tbody>
+                    {% for l in recent_logs %}
+                    <tr>
+                        <td>{% if l.level == 'WARNING' %}<span class="badge badge-pending">警告</span>{% elif l.level == 'ERROR' %}<span class="badge badge-failed">错误</span>{% else %}<span class="badge badge-success">信息</span>{% endif %}</td>
+                        <td><span style="font-family:var(--font-mono);font-size:0.8rem;">{{ l.module }}</span></td>
+                        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ l.message }}</td>
+                        <td><span class="time-text">{{ l.created_at.strftime('%m-%d %H:%M') }}</span></td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">暂无日志</div></div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
