@@ -1,31 +1,31 @@
 /**
  * ================================================================
- *  Bootloader v3.2 — ????????? + CCM RAM??
+ *  Bootloader v3.2 - Version Validate + CCM RAM Support
  * ================================================================
- *  ???? (v3.1 ? v3.2):
+ *  Changelog (v3.1 -> v3.2):
  *
- *  [v3.2] ?? is_valid_version() ?????????
- *  [v3.2] ?? boot.cfg ??????????
- *  [v3.2] RTC ????????????????
- *  [v3.2] boot_cfg_default ??? SYS_VERSION ?? SD (?????)
- *  [FIX]  jump_to_app ???????? BKP4R (APP ???? VTOR)
- *  [FIX]  is_app_valid ?? CCM RAM (0x1000xxxx) ???
- *  [FIX]  ??????:????????????,????A??
+ *  [v3.2] Add is_valid_version() to validate version strings
+ *  [v3.2] Auto-fix boot.cfg if version fields are corrupted
+ *  [v3.2] RTC backup register stores jump addr for APP VTOR
+ *  [v3.2] boot_cfg_default reads SYS_VERSION from SD (if exists)
+ *  [FIX]  jump_to_app: store jump addr in BKP4R (APP reads VTOR)
+ *  [FIX]  is_app_valid: accept CCM RAM (0x1000xxxx) as valid SP
+ *  [FIX]  Safe mode: KEY0 held at boot -> skip SD, fallback to A
  *
- *  startup_stm32f407xx.s ? Stack_Size ?? 0x2000 (8KB)
+ *  startup_stm32f407xx.s Stack_Size set to 0x2000 (8KB)
  *
- *  Flash ??:
+ *  Flash layout:
  *    0x08000000 +------------------+ Sector 0~5  (256KB) Bootloader
  *    0x08040000 +------------------+ Sector 6~8  (384KB) APP_A
  *    0x080A0000 +------------------+ Sector 9~11 (384KB) APP_B
- *    0x08100000 +------------------+ Flash ?? 1MB
+ *    0x08100000 +------------------+ Flash end   1MB
  * ================================================================
  */
 
 #include <stdarg.h>
 #include "./SYSTEM/sys/sys.h"
 #include "./SYSTEM/usart/usart.h"
-#include "./SYSTEM/delay/delay.h" 
+#include "./SYSTEM/delay/delay.h"
 #include "./BSP/LED/led.h"
 #include "./BSP/LCD/lcd.h"
 #include "./BSP/SDIO/sdio_sdcard.h"
@@ -39,7 +39,7 @@
 #include "boot_cfg.h"
 
 /* ==============================================================
- *  Flash ????
+ *  Flash address definitions
  * ============================================================== */
 #define FLASH_BOOT_ADDR         0x08000000
 #define FLASH_BOOT_SIZE         (256 * 1024)
@@ -48,7 +48,7 @@
 #define FLASH_APP_B_ADDR        0x080A0000
 #define FLASH_APP_SIZE          (384 * 1024)
 
-/* SD ????? (????, ?? boot.cfg ????) */
+/* SD file paths (boot.cfg overrides these defaults) */
 #define SD_FW_FLAG          "0:/OTA/update.flag"
 #define SD_FW_BIN           "0:/OTA/fw_new.bin"
 #define SD_FW_PATCH         "0:/OTA/patch.bin"
@@ -57,14 +57,14 @@
 #define SYS_VERSION         "1.0.0"
 #define BKUP_MAGIC          0x4F544142
 
-/* BKP ????? */
+/* Backup register mapping */
 #define BKUP_REG_MAGIC      RTC->BKP0R
 #define BKUP_REG_PART       RTC->BKP1R
 #define BKUP_REG_VERSION    RTC->BKP2R
 #define BKUP_REG_HEALTH     RTC->BKP3R
-#define BKUP_REG_JUMP_ADDR  RTC->BKP4R    /* [FIX] ?????? */
+#define BKUP_REG_JUMP_ADDR  RTC->BKP4R    /* [FIX] jump addr for VTOR */
 
-/* RGB565 ?? */
+/* RGB565 color definitions */
 #define C_WHITE     0xFFFF
 #define C_BLACK     0x0000
 #define C_RED       0xF800
@@ -78,7 +78,7 @@ static FATFS fs;
 static uint8_t rw_buf[4096];
 
 /* ==============================================================
- *  LCD ??
+ *  LCD helper functions
  * ============================================================== */
 static void lcd_c(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                   uint8_t sz, const char *s, uint16_t color)
@@ -108,7 +108,7 @@ static void lcd_fmt(uint16_t y, uint16_t color, const char *fmt, ...)
 }
 
 /* ==============================================================
- *  SD ?
+ *  SD card helpers
  * ============================================================== */
 static bool sd_safe_init(void)
 {
@@ -139,7 +139,7 @@ static bool sd_reinit(void)
 }
 
 /* ==============================================================
- *  Backup Registers
+ *  RTC Backup Register helpers
  * ============================================================== */
 static void bkup_enable(void)
 {
@@ -189,7 +189,7 @@ static void bkup_clear_update(void)
 }
 
 /* ==============================================================
- *  Bootloader ????
+ *  Bootloader address helper
  * ============================================================== */
 static uint32_t get_app_addr(char part)
 {
@@ -197,11 +197,11 @@ static uint32_t get_app_addr(char part)
 }
 
 /* ==============================================================
- *  [v3.2] ?????
+ *  [v3.2] Version string validator
  *
- *  ??: "X.Y.Z",?? 1~3 ???, ?? < 16
- *  ??: "1.0.0", "2.3.15", "9.99.999"
- *  ??:  "90.90.23130" (??3???), "abc", "", "1.2"
+ *  Format: "X.Y.Z", each segment 1~3 digits, total < 16 chars
+ *  Valid:   "1.0.0", "2.3.15", "9.99.999"
+ *  Invalid: "90.90.23130" (>3 digits), "abc", "", "1.2"
  * ============================================================== */
 static bool is_valid_version(const char *ver)
 {
@@ -229,9 +229,10 @@ static bool is_valid_version(const char *ver)
 }
 
 /* ==============================================================
- *  Flash ?? — WORD ??
+ *  Flash operations - WORD aligned
  * ============================================================== */
 
+/* Erase a partition (3 sectors) */
 static bool erase_partition(char part)
 {
     uint8_t start = (part == 'A') ? 6 : 9;
@@ -257,6 +258,7 @@ static bool erase_partition(char part)
     return true;
 }
 
+/* Write file from SD card to Flash partition, then verify */
 static bool flash_file_to_partition(const char *path, char part)
 {
     FIL fil; UINT br;
@@ -278,12 +280,13 @@ static bool flash_file_to_partition(const char *path, char part)
     printf("[FLASH] Size: %luB\r\n", (unsigned long)fsize);
     lcd_fmt(100, C_GRAY, "Size: %lu bytes", (unsigned long)fsize);
 
-    /* === ?? === */
+    /* --- Write --- */
     HAL_FLASH_Unlock();
     while (1) {
         if (f_read(&fil, rw_buf, sizeof(rw_buf), &br) != FR_OK || br == 0)
             break;
 
+        /* Write 4-byte aligned words */
         uint32_t aligned = br & ~3U;
         for (uint32_t i = 0; i < aligned; i += 4) {
             uint32_t word = *(uint32_t *)(rw_buf + i);
@@ -295,6 +298,7 @@ static bool flash_file_to_partition(const char *path, char part)
             }
             addr += 4;
         }
+        /* Pad trailing bytes with 0xFF */
         if (br > aligned) {
             uint8_t tail[4] = {0xFF, 0xFF, 0xFF, 0xFF};
             memcpy(tail, rw_buf + aligned, br - aligned);
@@ -303,6 +307,7 @@ static bool flash_file_to_partition(const char *path, char part)
         }
 
         written += br;
+        /* Update progress on LCD */
         {
             uint32_t pct = fsize ? (written * 100 / fsize) : 0;
             if (pct != last_pct) {
@@ -315,7 +320,7 @@ static bool flash_file_to_partition(const char *path, char part)
     f_close(&fil);
     printf("[FLASH] Written %luB\r\n", (unsigned long)written);
 
-    /* === ?? === */
+    /* --- Verify --- */
     lcd_info(150, "Verifying...");
     sd_reinit();
     if (f_open(&fil, path, FA_READ) != FR_OK) {
@@ -346,9 +351,10 @@ static bool flash_file_to_partition(const char *path, char part)
 }
 
 /* ==============================================================
- *  SDIFF01 ???? Flash
+ *  SDIFF01 patch apply to Flash
  * ============================================================== */
 
+/* Copy entire partition in Flash (src -> dst) */
 static bool flash_copy_partition(char src_part, char dst_part)
 {
     uint32_t src_addr = get_app_addr(src_part);
@@ -377,6 +383,7 @@ static bool flash_copy_partition(char src_part, char dst_part)
     return true;
 }
 
+/* Apply SDIFF01 patch: copy src -> dst, then overwrite changed chunks */
 static bool apply_sdiff_to_flash(const char *patch_path,
                                   char src_part, char dst_part)
 {
@@ -391,6 +398,7 @@ static bool apply_sdiff_to_flash(const char *patch_path,
 
     printf("[SDIFF] Apply %s: %c -> %c\r\n", patch_path, src_part, dst_part);
 
+    /* Open and validate patch header */
     if (f_open(&pf, patch_path, FA_READ) != FR_OK) {
         printf("[SDIFF] open patch fail\r\n");
         return false;
@@ -410,12 +418,14 @@ static bool apply_sdiff_to_flash(const char *patch_path,
     printf("[SDIFF] new_sz=%lu count=%lu\r\n",
            (unsigned long)new_sz, (unsigned long)count);
 
+    /* Step 1: Erase target partition */
     lcd_info(80, "Erasing target...");
     if (!erase_partition(dst_part)) {
         f_close(&pf);
         return false;
     }
 
+    /* Step 2: Copy source partition to destination */
     lcd_info(80, "Copying partition...");
     HAL_FLASH_Unlock();
     if (!flash_copy_partition(src_part, dst_part)) {
@@ -424,6 +434,7 @@ static bool apply_sdiff_to_flash(const char *patch_path,
         return false;
     }
 
+    /* Step 3: Apply patch chunks */
     lcd_info(80, "Applying patch...");
     dbuf = mymalloc(SRAMIN, 4096);
     if (!dbuf) {
@@ -438,6 +449,7 @@ static bool apply_sdiff_to_flash(const char *patch_path,
         f_read(&pf, &offset, 4, &br);
         f_read(&pf, &len,    4, &br);
 
+        /* Bounds check */
         if (len > 4096 || offset + len > FLASH_APP_SIZE) {
             printf("[SDIFF] chunk %lu invalid\r\n", (unsigned long)i);
             myfree(SRAMIN, dbuf);
@@ -448,6 +460,7 @@ static bool apply_sdiff_to_flash(const char *patch_path,
 
         f_read(&pf, dbuf, len, &br);
 
+        /* Overwrite changed bytes at target address */
         uint32_t target = dst_addr + offset;
         uint32_t aligned = len & ~3U;
         for (uint32_t j = 0; j < aligned; j += 4) {
@@ -463,6 +476,7 @@ static bool apply_sdiff_to_flash(const char *patch_path,
 
         patched += len;
 
+        /* Update progress on LCD */
         if (count > 0 && (i % (count / 10 + 1) == 0 || i == count - 1)) {
             uint32_t pct = (i + 1) * 100 / count;
             lcd_fmt(100, C_CYAN, "Patching... %lu%%", (unsigned long)pct);
@@ -480,7 +494,7 @@ static bool apply_sdiff_to_flash(const char *patch_path,
 }
 
 /* ==============================================================
- *  ?? / ??????
+ *  Full / Diff update entry points
  * ============================================================== */
 
 static bool sd_full_update(const char *fw_path, char target_part,
@@ -517,15 +531,16 @@ static bool sd_diff_update(const char *patch_path, char target_part,
 }
 
 /* ==============================================================
- *  [FIX] ?? App ??? — ?? CCM RAM (0x1000xxxx)
+ *  [FIX] Validate App before jump - accept CCM RAM (0x1000xxxx)
  *
- *  STM32F407 ??? RAM ??:
- *    ? SRAM:  0x20000000 ~ 0x2001FFFF (128KB)
- *    CCM RAM:  0x10000000 ~ 0x1000FFFF (64KB, ?CPU???)
+ *  STM32F407 valid RAM regions:
+ *    Main SRAM: 0x20000000 ~ 0x2001FFFF (128KB)
+ *    CCM RAM:   0x10000000 ~ 0x1000FFFF (64KB, CPU-only)
  *
- *  ??????????????? CCM RAM,
- *  ?? SP = 0x1000xxxx,??? (sp & 0x2FF00000)==0x20000000 ??????
- *  ???? 0x1000xxxx ????
+ *  Stack pointer from X-CUBE-AI may reside in CCM RAM,
+ *  so SP = 0x1000xxxx must not be rejected.
+ *  We accept both (sp & 0x2FF00000)==0x20000000 and
+ *  (sp & 0xFFF00000)==0x10000000 as valid.
  * ============================================================== */
 
 static bool is_app_valid(uint32_t addr)
@@ -533,7 +548,7 @@ static bool is_app_valid(uint32_t addr)
     uint32_t sp = *(volatile uint32_t *)addr;
     uint32_t pc = *(volatile uint32_t *)(addr + 4);
 
-    /* SP?????SRAM(0x2000xxxx)?CCM RAM(0x1000xxxx) */
+    /* SP must be in Main SRAM (0x2000xxxx) or CCM RAM (0x1000xxxx) */
     bool sp_ok = ((sp & 0x2FF00000) == 0x20000000) ||
                  ((sp & 0xFFF00000) == 0x10000000);
     bool pc_ok = ((pc & 0xFF000000) == 0x08000000);
@@ -542,7 +557,7 @@ static bool is_app_valid(uint32_t addr)
 }
 
 /* ==============================================================
- *  ??? App
+ *  Jump to Application
  * ============================================================== */
 
 static void jump_to_app(uint32_t addr)
@@ -561,46 +576,46 @@ static void jump_to_app(uint32_t addr)
            (unsigned long)addr, (unsigned long)sp, (unsigned long)pc);
 
     /* ============================================================
-     *  [FIX] ???????? BKP4R
+     *  [FIX] Store jump address in BKP4R
      *
-     *  ??: Bootloader ??? SCB->VTOR = addr,
-     *  ? APP ? SystemInit() ?? VTOR ??? 0x08040000,
-     *  ???? B ?, VTOR ??? A, ??????, WiFi ????
+     *  Problem: Bootloader sets SCB->VTOR = addr,
+     *  but APP SystemInit() may reset VTOR to 0x08040000,
+     *  causing wrong vector table for Partition B.
      *
-     *  APP ? main() ?? BKP4R ??? VTOR:
+     *  Solution: APP reads BKP4R at main() entry to set VTOR:
      *    SCB->VTOR = BKUP_REG_JUMP_ADDR;
      * ============================================================ */
     bkup_enable();
     BKUP_REG_JUMP_ADDR = addr;
     printf("[BKUP] Stored jump addr: 0x%08lX\r\n", (unsigned long)addr);
 
-    /* ???????? */
+    /* Wait for USART TX to complete */
     while (!(USART1->SR & USART_SR_TC));
 
-    /* ?????? */
+    /* Unmount SD card */
     f_mount(NULL, "0:", 0);
 
-    /* ??? */
+    /* Disable all interrupts */
     __disable_irq();
 
-    /* ?? SysTick */
+    /* Stop SysTick */
     SysTick->CTRL = 0;
     SysTick->LOAD = 0;
     SysTick->VAL  = 0;
 
-    /* ???? NVIC ?? */
+    /* Clear all NVIC pending and enabled interrupts */
     for (int i = 0; i < 8; i++) {
         NVIC->ICER[i] = 0xFFFFFFFF;
         NVIC->ICPR[i] = 0xFFFFFFFF;
     }
 
-    /* ?? SDIO */
+    /* Disable SDIO peripheral */
     SDIO->DCTRL = 0;
     SDIO->CLKCR = 0;
     SDIO->POWER = 0;
     SDIO->ICR   = 0x00C007FF;
 
-    /* ?? DMA */
+    /* Disable DMA streams used by SDIO */
     DMA1_Stream0->CR &= ~DMA_SxCR_EN;
     DMA1_Stream5->CR &= ~DMA_SxCR_EN;
     DMA2_Stream0->CR &= ~DMA_SxCR_EN;
@@ -611,32 +626,33 @@ static void jump_to_app(uint32_t addr)
     DMA2->LIFCR = 0xFFFFFFFF;
     DMA2->HIFCR = 0xFFFFFFFF;
 
-    /* ?? USART1 (????) */
+    /* Disable USART1 (debug serial) */
     USART1->CR1 = 0;
     RCC->APB2ENR &= ~(1 << 11);
 
-    /* ?? USART3 (WiFi ??) */
+    /* Disable USART3 (WiFi module) */
     USART3->CR1 = 0;
     RCC->APB1ENR &= ~(1 << 18);
 
-    /* ?? VTOR */
+    /* Set vector table offset */
     SCB->VTOR = addr;
 
-    /* ?? */
+    /* Set MSP and jump */
     __set_MSP(sp);
     __DSB();
     __ISB();
 
     ((void (*)(void))pc)();
 
-    /* ??????? */
+    /* Should never reach here */
     while (1) { LED0_TOGGLE(); delay_ms(100); }
 }
 
 /* ==============================================================
- *  ?? & ??
+ *  Key and Debug helpers
  * ============================================================== */
 
+/* Check if KEY0 (PE4) is pressed with debounce */
 static uint8_t key0_pressed(void)
 {
     if ((GPIOE->IDR & (1 << 4)) == 0) {
@@ -646,6 +662,7 @@ static uint8_t key0_pressed(void)
     return 0;
 }
 
+/* Dump first N words from Flash for debugging */
 static void debug_dump_flash(uint32_t addr, int words)
 {
     uint32_t *p = (uint32_t *)addr;
@@ -698,7 +715,7 @@ int main(void)
     boot_cfg_default(&cfg);
 
     /* ==========================================================
-     *  ???? (KEY0 ??)
+     *  Safe mode (KEY0 held at boot)
      * ========================================================== */
     {
         uint8_t held = 0;
@@ -713,7 +730,7 @@ int main(void)
     }
 
     if (skip_sd) {
-        /* ??????????SD,???????boot.cfg */
+        /* Safe mode: try SD init, read boot.cfg for partition info */
         bool sd_safe = sd_safe_init();
         if (sd_safe) {
             if (f_mount(&fs, "0:", 1) != FR_OK) {
@@ -721,7 +738,7 @@ int main(void)
             }
         }
 
-        /* ??boot.cfg????????? */
+        /* Read boot.cfg to get partition versions */
         if (sd_safe) {
             if (!boot_cfg_read(&cfg)) {
                 printf("[BOOT] Safe mode: boot.cfg read fail, using defaults\r\n");
@@ -739,7 +756,7 @@ int main(void)
                cfg.active[0]);
 
         if (a_ok && b_ok) {
-            /* ?????,???????? */
+            /* Both valid, boot the opposite of current */
             if (cfg.active[0] == 'B') {
                 boot_cfg_set_active(&cfg, 'A');
             } else {
@@ -763,7 +780,7 @@ int main(void)
             }
         }
 
-        /* ??:???????boot.cfg,??????????active */
+        /* Safe mode: save corrected boot.cfg */
         if (sd_safe) {
             boot_cfg_write(&cfg);
             printf("[BOOT] Safe mode: saved active=%c to boot.cfg\r\n",
@@ -787,7 +804,7 @@ int main(void)
 
 
     /* ==========================================================
-     *  SD ????
+     *  SD card initialization
      * ========================================================== */
     lcd_info(40, "Init SD card...");
     sd_ok = sd_safe_init();
@@ -806,7 +823,7 @@ int main(void)
     }
 
     /* ==========================================================
-     *  ?? boot.cfg + [v3.2] ?????
+     *  Load boot.cfg + [v3.2] version validation
      * ========================================================== */
     if (sd_ok) {
         if (!boot_cfg_read(&cfg)) {
@@ -815,7 +832,7 @@ int main(void)
             boot_cfg_write(&cfg);
         }
 
-        /* === [v3.2] ????? === */
+        /* === [v3.2] Version field validation === */
         {
             bool need_fix = false;
 
@@ -850,7 +867,7 @@ int main(void)
 
         boot_cfg_dump(&cfg);
 
-        /* RTC ?: ???????? */
+        /* Check RTC backup: apply pending update if partition is valid */
         {
             char pend_part;
             char pend_ver[16];
@@ -859,7 +876,7 @@ int main(void)
                 printf("[BKUP] Pending: part=%c ver=%s\r\n",
                        pend_part, pend_ver);
 
-                /* [v3.2] ????? */
+                /* [v3.2] Validate pending version */
                 if (!is_valid_version(pend_ver)) {
                     printf("[BKUP] Invalid pending ver: %s, skip\r\n", pend_ver);
                     bkup_clear_update();
@@ -877,7 +894,7 @@ int main(void)
             }
         }
 
-        /* ??????????, ???? */
+        /* If current partition is invalid, fallback to the other */
         {
             uint32_t cur_addr = boot_cfg_active_addr(&cfg);
             if (!is_app_valid(cur_addr)) {
@@ -899,7 +916,7 @@ int main(void)
                 cfg.active[0], boot_cfg_active_ver(&cfg));
 
         /* ======================================================
-         *  ?? SD ??? update.flag
+         *  Check SD card for update.flag
          * ====================================================== */
         {
             FIL fil;
@@ -920,10 +937,12 @@ int main(void)
                 f_close(&fil);
                 printf("[BOOT] Flag: [%s]\r\n", flag);
 
+                /* Parse target partition */
                 {
                     char *p = strstr(flag, "target=");
                     if (p) { target[0] = p[7]; target[1] = '\0'; }
                 }
+                /* Parse version string */
                 {
                     char *p = strstr(flag, "version=");
                     if (p) {
@@ -935,7 +954,7 @@ int main(void)
                     }
                 }
 
-                /* [v3.2] ?? new_ver */
+                /* [v3.2] Validate new_ver from flag file */
                 if (strlen(new_ver) > 0 && !is_valid_version(new_ver)) {
                     printf("[BOOT] update.flag has invalid version: %s, skip\r\n",
                            new_ver);
@@ -953,7 +972,7 @@ int main(void)
             }
 
             /* ==================================================
-             *  ????
+             *  Perform update
              * ================================================== */
             if (do_update) {
                 char target_part;
@@ -1008,7 +1027,7 @@ int main(void)
     }
 
     /* ==========================================================
-     *  ??? App
+     *  Jump to App
      * ========================================================== */
 do_jump:
     target_addr = boot_cfg_active_addr(&cfg);
