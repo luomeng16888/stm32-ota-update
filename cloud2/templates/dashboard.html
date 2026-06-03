@@ -162,6 +162,9 @@ body::after{
 .fw-ver{font-family:var(--font-mono);font-weight:500;font-size:.92rem;min-width:60px}
 .fw-md5{font-family:var(--font-mono);font-size:.68rem;color:var(--t3);min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fw-size{font-family:var(--font-mono);font-size:.76rem;color:var(--t2);min-width:60px}
+.fw-dual{font-size:.6rem;padding:2px 7px;border-radius:4px;font-weight:600;letter-spacing:.02em}
+.fw-dual.yes{background:var(--ok-s);color:var(--ok)}
+.fw-dual.no{background:var(--wn-s);color:var(--wn)}
 .fw-badge{font-size:.62rem;padding:3px 9px;border-radius:5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .fw-badge.live{background:var(--ok-s);color:var(--ok);border:1px solid rgba(34,197,94,.15)}
 .fw-spacer{flex:1}
@@ -191,7 +194,16 @@ body::after{
 .spinner{width:20px;height:20px;border:2px solid var(--bd);border-top-color:var(--ac);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-@media(max-width:920px){.stats{grid-template-columns:repeat(2,1fr)}.grid-2{grid-template-columns:1fr}}
+.upload-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.upload-box{border:2px dashed var(--bd);border-radius:var(--rs);padding:20px 16px;text-align:center;transition:all .3s;cursor:pointer;position:relative;min-height:100px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+.upload-box:hover,.upload-box.drag{border-color:var(--ac);background:var(--ac-s)}
+.upload-box input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.upload-box .label{font-size:.72rem;font-weight:600;color:var(--ac);text-transform:uppercase;letter-spacing:.05em}
+.upload-box .desc{font-size:.76rem;color:var(--t3)}
+.upload-box.has-file{border-color:var(--ok);border-style:solid;background:var(--ok-s)}
+.upload-box.has-file .label{color:var(--ok)}
+
+@media(max-width:920px){.stats{grid-template-columns:repeat(2,1fr)}.grid-2{grid-template-columns:1fr}.upload-row{grid-template-columns:1fr}}
 @media(max-width:520px){.stats{grid-template-columns:1fr}.shell{padding:14px 16px 36px}.header{flex-direction:column;align-items:flex-start;gap:14px}.header-right{width:100%;justify-content:space-between}}
 </style>
 </head>
@@ -238,8 +250,8 @@ body::after{
         <div class="stat-val amber">{{ stats.fwCount }}</div>
       </div>
       <div class="stat">
-        <div class="stat-icon purple">🚀</div>
-        <div class="stat-label">活跃版本</div>
+        <div class="stat-icon purple">🏷️</div>
+        <div class="stat-label">当前活跃</div>
         <div class="stat-val white">{{ stats.active }}</div>
       </div>
     </section>
@@ -257,7 +269,7 @@ body::after{
               <div class="dev-name">{{ d.id }}</div>
               <div class="dev-row">
                 <span>固件 v{{ d.fw }}</span>
-                <span>型号 {{ d.model }}</span>
+                <span>{{ d.model }}</span>
                 <span>{{ ago(d.last_seen) }}</span>
                 <span v-if="d.ip">{{ d.ip }}</span>
               </div>
@@ -267,7 +279,7 @@ body::after{
         </div>
         <div class="empty" v-else>
           <div class="empty-icon">📡</div>
-          <div>暂无设备注册</div>
+          <div>暂无注册设备</div>
         </div>
       </div>
 
@@ -276,47 +288,70 @@ body::after{
           <div class="panel-title">固件管理</div>
           <div class="panel-count">{{ firmware.length }} 个版本</div>
         </div>
+
+        <!-- 版本号输入 -->
         <div class="input-row">
           <input class="inp" v-model="fwVer" placeholder="版本号 (如 1.0.5)">
-          <button class="btn btn-p" @click="$refs.fileInp.click()">选择文件</button>
         </div>
-        <div class="upload-area"
-             :class="{'drag':dragging}"
-             @dragover.prevent="dragging=true"
-             @dragleave="dragging=false"
-             @drop.prevent="onDrop">
-          <input type="file" ref="fileInp" accept=".bin" @change="onFile">
-          <div class="upload-ico">📦</div>
-          <div class="upload-text">拖拽 .bin 固件到此处，或 <b>点击选择</b></div>
-          <div class="upload-hint">支持任意 .bin 格式固件文件</div>
+
+        <!-- 双分区上传区域 -->
+        <div class="upload-row">
+          <div class="upload-box" :class="{'has-file': pendingFileA, 'drag': dragA}"
+               @dragover.prevent="dragA=true"
+               @dragleave="dragA=false"
+               @drop.prevent="onDropA($event)">
+            <input type="file" ref="fileInpA" accept=".bin" @change="onFileA">
+            <div class="label">分区 A</div>
+            <div class="desc" v-if="!pendingFileA">拖放或点击选择</div>
+            <div class="desc" v-else style="color:var(--ok)">{{ pendingFileA.name }}</div>
+            <div class="desc" style="font-size:.66rem;color:var(--t3)">IROM 0x08040000</div>
+          </div>
+          <div class="upload-box" :class="{'has-file': pendingFileB, 'drag': dragB}"
+               @dragover.prevent="dragB=true"
+               @dragleave="dragB=false"
+               @drop.prevent="onDropB($event)">
+            <input type="file" ref="fileInpB" accept=".bin" @change="onFileB">
+            <div class="label">分区 B</div>
+            <div class="desc" v-if="!pendingFileB">拖放或点击选择 (可选)</div>
+            <div class="desc" v-else style="color:var(--ok)">{{ pendingFileB.name }}</div>
+            <div class="desc" style="font-size:.66rem;color:var(--t3)">IROM 0x080A0000</div>
+          </div>
         </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:18px;">
+          <button class="btn btn-p" @click="doUpload" style="flex:1">上传固件</button>
+        </div>
+
+        <!-- 固件列表 -->
         <div class="panel-head" style="margin-top:8px">
-          <div class="panel-title">版本历史</div>
+          <div class="panel-title">已上传版本</div>
         </div>
         <div class="fw-list" v-if="firmware.length">
           <div class="fw-item" v-for="f in firmware" :key="f.version"
                :class="f.version===activeFW?'active':''">
             <div class="fw-ver">v{{ f.version }}</div>
-            <div class="fw-size">{{ fmtSize(f.size) }}</div>
-            <div class="fw-md5" :title="f.md5">{{ f.md5 ? f.md5.substring(0,12)+'...' : '' }}</div>
-            <div class="fw-badge live" v-if="f.version===activeFW">● 活跃</div>
+            <div class="fw-size">{{ fmtSize(f.size_a) }}</div>
+            <div class="fw-dual yes" v-if="f.dual">A+B</div>
+            <div class="fw-dual no" v-else>A</div>
+            <div class="fw-md5" :title="f.md5_a">{{ f.md5_a ? f.md5_a.substring(0,10)+'...' : '' }}</div>
+            <div class="fw-badge live" v-if="f.version===activeFW">活跃</div>
             <div class="fw-spacer" v-else></div>
             <div class="fw-btns">
-              <button class="btn btn-sm btn-ok" v-if="f.version!==activeFW" @click="activate(f.version)">激活</button>
+              <button class="btn btn-sm btn-ok" v-if="f.version!==activeFW" @click="activate(f.version)">发布</button>
               <button class="btn btn-sm btn-er" @click="del(f.version)">删除</button>
             </div>
           </div>
         </div>
         <div class="empty" v-else>
           <div class="empty-icon">📦</div>
-          <div>暂无固件，上传第一个版本</div>
+          <div>暂无固件，请上传第一个版本</div>
         </div>
       </div>
     </div>
 
     <div class="log-panel">
       <div class="panel-head">
-        <div class="panel-title">活动日志</div>
+        <div class="panel-title">系统日志</div>
         <div class="panel-count">最近 {{ logs.length }} 条</div>
       </div>
       <div class="log-scroll" v-if="logs.length">
@@ -328,7 +363,7 @@ body::after{
       </div>
       <div class="empty" v-else>
         <div class="empty-icon">📋</div>
-        <div>暂无日志记录</div>
+        <div>暂无日志</div>
       </div>
     </div>
   </div>
@@ -346,11 +381,14 @@ createApp({
     const activeFW = ref('');
     const logs = ref([]);
     const fwVer = ref('');
-    const pendingFile = ref(null);
-    const dragging = ref(false);
+    const pendingFileA = ref(null);
+    const pendingFileB = ref(null);
+    const dragA = ref(false);
+    const dragB = ref(false);
     const clock = ref('');
     const toast = reactive({show:false,type:'ok',msg:''});
-    const fileInp = ref(null);
+    const fileInpA = ref(null);
+    const fileInpB = ref(null);
     let timer = null;
 
     function showToast(msg,ok){
@@ -395,35 +433,49 @@ createApp({
       }catch(e){console.error('Load error:',e);}
     }
 
-    function onFile(e){
+    function onFileA(e){
       const f=e.target.files[0];if(!f)return;
-      pendingFile.value=f;
+      pendingFileA.value=f;
       if(!fwVer.value){const m=f.name.match(/(\d+\.\d+\.\d+)/);if(m)fwVer.value=m[1];}
-      doUpload();
     }
 
-    function onDrop(e){
-      dragging.value=false;
+    function onFileB(e){
+      const f=e.target.files[0];if(!f)return;
+      pendingFileB.value=f;
+    }
+
+    function onDropA(e){
+      dragA.value=false;
       const f=e.dataTransfer.files[0];if(!f)return;
-      pendingFile.value=f;
+      pendingFileA.value=f;
       if(!fwVer.value){const m=f.name.match(/(\d+\.\d+\.\d+)/);if(m)fwVer.value=m[1];}
-      doUpload();
+    }
+
+    function onDropB(e){
+      dragB.value=false;
+      const f=e.dataTransfer.files[0];if(!f)return;
+      pendingFileB.value=f;
     }
 
     async function doUpload(){
       const ver=fwVer.value.trim();
       if(!ver)return showToast('请输入版本号',false);
-      if(!pendingFile.value)return showToast('请选择固件文件',false);
+      if(!pendingFileA.value)return showToast('请选择分区A固件',false);
       const fd=new FormData();
       fd.append('version',ver);
-      fd.append('firmware',pendingFile.value,pendingFile.value.name);
+      fd.append('firmware_a',pendingFileA.value,pendingFileA.value.name);
+      if(pendingFileB.value){
+        fd.append('firmware_b',pendingFileB.value,pendingFileB.value.name);
+      }
       try{
         const r=await fetch('/api/dashboard/upload',{method:'POST',body:fd});
         const d=await r.json();
         if(d.ok){
-          showToast('上传成功 v'+ver,true);
-          pendingFile.value=null;fwVer.value='';
-          if(fileInp.value)fileInp.value.value='';
+          const mode=pendingFileB.value?' (A+B双分区)':' (仅分区A)';
+          showToast('上传成功 v'+ver+mode,true);
+          pendingFileA.value=null;pendingFileB.value=null;fwVer.value='';
+          if(fileInpA.value)fileInpA.value.value='';
+          if(fileInpB.value)fileInpB.value.value='';
           loadAll();
         }else showToast(d.error||'上传失败',false);
       }catch(e){showToast('上传失败',false);}
@@ -436,13 +488,13 @@ createApp({
           body:JSON.stringify({version:ver})
         });
         const d=await r.json();
-        if(d.ok){showToast('已激活 v'+ver,true);loadAll();}
-        else showToast(d.error||'失败',false);
-      }catch(e){showToast('请求失败',false);}
+        if(d.ok){showToast('已发布 v'+ver,true);loadAll();}
+        else showToast(d.error||'发布失败',false);
+      }catch(e){showToast('操作失败',false);}
     }
 
     async function del(ver){
-      if(!confirm('确定删除 v'+ver+' ?'))return;
+      if(!confirm('确认删除 v'+ver+' ?'))return;
       try{
         const r=await fetch('/api/dashboard/firmware',{
           method:'DELETE',headers:{'Content-Type':'application/json'},
@@ -450,8 +502,8 @@ createApp({
         });
         const d=await r.json();
         if(d.ok){showToast('已删除 v'+ver,true);loadAll();}
-        else showToast(d.error||'失败',false);
-      }catch(e){showToast('请求失败',false);}
+        else showToast(d.error||'删除失败',false);
+      }catch(e){showToast('操作失败',false);}
     }
 
     onMounted(()=>{
@@ -462,8 +514,9 @@ createApp({
 
     return{
       stats,devices,firmware,activeFW,logs,
-      fwVer,dragging,clock,toast,fileInp,
-      ago,fmtSize,fmtTime,onFile,onDrop,activate,del
+      fwVer,pendingFileA,pendingFileB,dragA,dragB,
+      clock,toast,fileInpA,fileInpB,
+      ago,fmtSize,fmtTime,onFileA,onFileB,onDropA,onDropB,doUpload,activate,del
     };
   }
 }).mount('#app');

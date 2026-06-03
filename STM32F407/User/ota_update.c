@@ -1,11 +1,6 @@
 /**
  * ================================================================
- *  ota_update.c — 固件 + 模型下载 (v4.3 for AI weights OTA)
- *
- *  v4.2 → v4.3:
- *    [FIX] start_md_update(): 下载文件名从 .tflite 改为 .bin
- *    [FIX] start_md_update(): 版本记录写入 SD_MD_VER_FILE
- *    [FIX] start_md_update(): f_mkdir 增加错误检查
+ *  ota_update.c — 固件 + 模型下载 + BSPatch调用 (v4.4)
  * ================================================================
  */
 #include "ota.h"
@@ -71,7 +66,7 @@ void load_md_ver(char *buf, int sz)
     }
 }
 
-/* ==================== LCD 进度 (新增) ==================== */
+/* ==================== LCD 进度 ==================== */
 
 static void update_dl_progress(uint32_t done, uint32_t total, uint32_t t0)
 {
@@ -245,7 +240,7 @@ void write_update_flag(const char *ver, char target, bool is_diff)
 }
 
 /* ============================================================
- *  start_fw_update() — 固件更新
+ *  start_fw_update() — 固件更新 (全量/差分)
  * ============================================================ */
 bool start_fw_update(bool is_diff)
 {
@@ -263,14 +258,42 @@ bool start_fw_update(bool is_diff)
     if (is_diff) {
         snprintf(url, sizeof(url), "%sfirmware/%s/%s",
                  API_CHUNK_PATCH, g_current_ver, D.fw_ver);
+
+        printf("[FW] Downloading patch...\r\n");
+        bool ok = dl_to_sd(url, D.fw_patch_sz, SD_FW_PATCH);
+        if (!ok) {
+            snprintf(g_dl.msg, sizeof(g_dl.msg), "Patch download failed");
+            return false;
+        }
+
+        char old_fw_path[64];
+        snprintf(old_fw_path, sizeof(old_fw_path),
+                 "%s/firmware_%c.bin", SD_OTA_DIR, cur_active);
+
+        char new_fw_path[64];
+        snprintf(new_fw_path, sizeof(new_fw_path),
+                 "%s/firmware_%c.bin", SD_OTA_DIR, new_active);
+
+        printf("[FW] BSPatch: %s + %s -> %s\r\n",
+               old_fw_path, SD_FW_PATCH, new_fw_path);
+
+        int bsp_ret = bspatch_apply(old_fw_path, SD_FW_PATCH, new_fw_path);
+        if (bsp_ret != 0) {
+            printf("[FW] BSPatch failed: %d\r\n", bsp_ret);
+            snprintf(g_dl.msg, sizeof(g_dl.msg),
+                     "BSPatch error %d", bsp_ret);
+            f_unlink(new_fw_path);
+            return false;
+        }
+
+        f_unlink(SD_FW_PATCH);
+        printf("[FW] Diff update OK\r\n");
+
     } else {
         snprintf(url, sizeof(url), "%s%s", API_CHUNK_FW, D.fw_ver);
+        bool ok = dl_to_sd(url, D.fw_sz, SD_FW_NEW);
+        if (!ok) return false;
     }
-
-    bool ok = dl_to_sd(url,
-                       is_diff ? D.fw_patch_sz : D.fw_sz,
-                       is_diff ? SD_FW_PATCH : SD_FW_NEW);
-    if (!ok) return false;
 
     write_update_flag(D.fw_ver, new_active, is_diff);
 
@@ -293,34 +316,57 @@ bool start_md_update(bool is_diff)
            is_diff ? "DIFF" : "FULL",
            D.md_ver, D.md_ver_new);
 
-    if (is_diff) {
-        snprintf(url, sizeof(url), "%smodel/%s/%s",
-                 API_CHUNK_PATCH, D.md_ver, D.md_ver_new);
-    } else {
-        snprintf(url, sizeof(url), "%s%s", API_CHUNK_MODEL, D.md_ver_new);
-    }
-
-    /* 创建目录 */
     f_mkdir(SD_OTA_DIR);
     f_mkdir(SD_MODEL_DIR);
 
-    /* 先下载到临时文件,再原子替换 */
     snprintf(temp_path, sizeof(temp_path), "%s/model_tmp.bin", SD_MODEL_DIR);
     snprintf(model_path, sizeof(model_path), "%s/model.bin", SD_MODEL_DIR);
 
-    printf("[MD] Download to: %s\r\n", temp_path);
+    if (is_diff) {
+        char patch_path[80];
+        snprintf(patch_path, sizeof(patch_path),
+                 "%s/model_patch.bin", SD_MODEL_DIR);
 
-    bool ok = dl_to_sd(url,
-                       is_diff ? D.md_patch_sz : D.md_sz,
-                       temp_path);                        /* 下载到临时文件 */
-    if (!ok) {
-        f_unlink(temp_path);                              /* 下载失败则删除临时文件 */
-        return false;
+        snprintf(url, sizeof(url), "%smodel/%s/%s",
+                 API_CHUNK_PATCH, D.md_ver, D.md_ver_new);
+
+        printf("[MD] Downloading patch...\r\n");
+        bool ok = dl_to_sd(url, D.md_patch_sz, patch_path);
+        if (!ok) {
+            snprintf(g_dl.msg, sizeof(g_dl.msg), "Patch download failed");
+            f_unlink(patch_path);
+            return false;
+        }
+
+        printf("[MD] BSPatch: %s + %s -> %s\r\n",
+               model_path, patch_path, temp_path);
+
+        int bsp_ret = bspatch_apply(model_path, patch_path, temp_path);
+        if (bsp_ret != 0) {
+            printf("[MD] BSPatch failed: %d\r\n", bsp_ret);
+            snprintf(g_dl.msg, sizeof(g_dl.msg),
+                     "BSPatch error %d", bsp_ret);
+            f_unlink(temp_path);
+            f_unlink(patch_path);
+            return false;
+        }
+
+        f_unlink(patch_path);
+        printf("[MD] Diff update OK\r\n");
+
+    } else {
+        snprintf(url, sizeof(url), "%s%s", API_CHUNK_MODEL, D.md_ver_new);
+        printf("[MD] Download to: %s\r\n", temp_path);
+
+        bool ok = dl_to_sd(url, D.md_sz, temp_path);
+        if (!ok) {
+            f_unlink(temp_path);
+            return false;
+        }
     }
 
-    /* 原子替换: 先删旧文件,再重命名 */
-    f_unlink(model_path);                                 /* 删除旧文件 */
-    if (f_rename(temp_path, model_path) != FR_OK) {       /* 临时 → 正式 */
+    f_unlink(model_path);
+    if (f_rename(temp_path, model_path) != FR_OK) {
         printf("[MD] rename fail\r\n");
         snprintf(g_dl.msg, sizeof(g_dl.msg), "Rename error");
         return false;
@@ -328,7 +374,6 @@ bool start_md_update(bool is_diff)
 
     printf("[MD] Model replaced: %s\r\n", model_path);
 
-    /* 更新版本 */
     FIL f; UINT bw;
     if (f_open(&f, SD_MD_VER_FILE, FA_CREATE_ALWAYS | FA_WRITE) == FR_OK) {
         f_write(&f, D.md_ver_new, strlen(D.md_ver_new), &bw);

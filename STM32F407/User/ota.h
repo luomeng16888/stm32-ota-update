@@ -132,6 +132,10 @@ bool start_md_update(bool is_diff);
 void load_md_ver(char *buf, int sz);
 void write_update_flag(const char *ver, char target, bool is_diff);
 
+/* ==================== bspatch.c ==================== */
+int  bspatch_apply(const char *old_path,
+                   const char *patch_path,
+                   const char *new_path);
 /* ==================== demo.c ==================== */
 void demo_run(void);
 void lcd_page_main(void);

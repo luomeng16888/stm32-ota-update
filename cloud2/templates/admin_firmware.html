@@ -4,7 +4,7 @@
 <div class="page-header">
     <div class="breadcrumb-bar"><a href="/admin">仪表盘</a><span>/</span><span>固件管理</span></div>
     <h4>固件管理</h4>
-    <div class="sub">上传、发布和管理设备固件</div>
+    <div class="sub">上传、发布和管理设备固件（支持双分区独立编译）</div>
 </div>
 
 <div class="card mb-4 anim-1">
@@ -23,17 +23,22 @@
                     <input class="form-control" name="device_model" value="STM32F407ZGT6">
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label">固件文件 (.bin)</label>
-                    <input class="form-control" type="file" name="firmware" accept=".bin" required>
+                    <label class="form-label">分区 A 固件 (.bin)</label>
+                    <input class="form-control" type="file" name="firmware_a" accept=".bin" required>
+                    <div style="font-size:0.72rem;color:var(--text-muted);margin-top:3px;">编译地址 0x08040000</div>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label">&nbsp;</label>
-                    <button type="submit" class="btn btn-primary w-100">上传固件</button>
+                    <label class="form-label">分区 B 固件 (.bin)</label>
+                    <input class="form-control" type="file" name="firmware_b" accept=".bin">
+                    <div style="font-size:0.72rem;color:var(--text-muted);margin-top:3px;">编译地址 0x080A0000（可选）</div>
                 </div>
             </div>
             <div class="mt-3">
                 <label class="form-label">更新说明</label>
                 <input class="form-control" name="release_notes" placeholder="本次更新的内容说明...">
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary">上传固件</button>
             </div>
         </form>
     </div>
@@ -47,13 +52,33 @@
     <div class="card-body p-0">
         {% if firmwares %}
         <table class="table table-hover mb-0">
-            <thead><tr><th>版本</th><th>型号</th><th>大小</th><th>MD5</th><th>状态</th><th>上传时间</th><th>操作</th></tr></thead>
+            <thead>
+                <tr>
+                    <th>版本</th>
+                    <th>型号</th>
+                    <th>分区 A</th>
+                    <th>分区 B</th>
+                    <th>MD5 (A)</th>
+                    <th>状态</th>
+                    <th>上传时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
             <tbody>
             {% for fw in firmwares %}
             <tr>
                 <td><span class="ver-text">v{{ fw.version }}</span></td>
                 <td><span style="font-size:0.8rem;color:var(--text-secondary)">{{ fw.device_model }}</span></td>
-                <td><span class="size-text">{{ '%.1f' | format(fw.file_size/1024) }} KB</span></td>
+                <td>
+                    <span class="size-text">{{ '%.1f' | format(fw.file_size/1024) }} KB</span>
+                </td>
+                <td>
+                    {% if fw.file_path_b %}
+                    <span class="size-text">{{ '%.1f' | format(fw.file_size_b/1024) }} KB</span>
+                    {% else %}
+                    <span style="color:var(--text-muted);font-size:0.78rem;">未上传</span>
+                    {% endif %}
+                </td>
                 <td><span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted)">{{ fw.file_md5[:12] }}...</span></td>
                 <td>{% if fw.is_active %}<span class="badge badge-success">已发布</span>{% else %}<span class="badge" style="background:#f1f5f9;color:#64748b">未发布</span>{% endif %}</td>
                 <td><span class="time-text">{{ fw.created_at.strftime('%m-%d %H:%M') }}</span></td>

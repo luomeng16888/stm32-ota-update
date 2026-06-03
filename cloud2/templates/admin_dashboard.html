@@ -40,13 +40,14 @@
             <div class="card-body p-0">
                 {% if firmwares %}
                 <table class="table table-hover mb-0">
-                    <thead><tr><th>版本</th><th>状态</th><th>大小</th><th>上传时间</th></tr></thead>
+                    <thead><tr><th>版本</th><th>状态</th><th>分区 A</th><th>分区 B</th><th>上传时间</th></tr></thead>
                     <tbody>
                     {% for fw in firmwares[:5] %}
                     <tr>
                         <td><span class="ver-text">v{{ fw.version }}</span></td>
                         <td>{% if fw.is_active %}<span class="badge badge-success">已发布</span>{% else %}<span class="badge" style="background:#f1f5f9;color:#64748b">未发布</span>{% endif %}</td>
                         <td><span class="size-text">{{ '%.1f' | format(fw.file_size/1024) }} KB</span></td>
+                        <td>{% if fw.file_path_b %}<span class="size-text">{{ '%.1f' | format(fw.file_size_b/1024) }} KB</span>{% else %}<span style="color:var(--text-muted);font-size:0.78rem;">—</span>{% endif %}</td>
                         <td><span class="time-text">{{ fw.created_at.strftime('%m-%d %H:%M') }}</span></td>
                     </tr>
                     {% endfor %}

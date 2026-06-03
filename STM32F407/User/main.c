@@ -17,5 +17,5 @@ int main(void)
     key_init();
     lcd_init();
 
-    demo_run();   /* ?? OTA ??? */
+    demo_run();   /*OTA */
 }
