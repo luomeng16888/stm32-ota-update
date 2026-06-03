@@ -1,0 +1,1327 @@
+# app.py - OTA Server v2.5 (BSDIFF40 + deflate 压缩)
+# 修改点: 补丁格式从 BSPAT01+RLE 改为 BSDIFF40+deflate, 适配嵌入端流式解压
+
+import os
+import json
+import hashlib
+import struct
+import bz2
+import zlib
+from datetime import datetime, timezone
+from functools import wraps
+
+from flask import (
+    Flask, render_template, request, redirect, url_for,
+    flash, jsonify, send_file, abort, Response
+)
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import (
+    LoginManager, UserMixin, login_user, logout_user,
+    login_required, current_user
+)
+from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+
+# ============================================================
+# App Configuration
+# ============================================================
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'ota-secret-key-change-me'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///ota.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['UPLOAD_FOLDER'] = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'uploads'
+)
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
+
+db = SQLAlchemy(app)
+
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+login_manager.login_message = '请先登录以访问该页面'
+login_manager.login_message_category = 'info'
+
+os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'firmware'), exist_ok=True)
+os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'models'), exist_ok=True)
+os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'patches'), exist_ok=True)
+
+
+@app.after_request
+def add_keep_alive(response):
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['Keep-Alive'] = 'timeout=30, max=1000'
+    return response
+
+
+def utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def log_event(level, module, message, device_id='', ip_address=''):
+    try:
+        entry = ServerLog(
+            level=level, module=module, message=message,
+            device_id=device_id, ip_address=ip_address
+        )
+        db.session.add(entry)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+# ============================================================
+# Database Models
+# ============================================================
+
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128), nullable=False)
+    email = db.Column(db.String(120), default='')
+    role = db.Column(db.String(10), default='user')
+    created_at = db.Column(db.DateTime, default=utcnow)
+    last_login = db.Column(db.DateTime)
+    devices = db.relationship('Device', backref='owner', lazy=True)
+    feedbacks = db.relationship('Feedback', backref='user', lazy=True)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+
+class Device(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.String(64), unique=True, nullable=False)
+    device_model = db.Column(db.String(32), default='STM32F407ZGT6')
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    current_sys_version = db.Column(db.String(16), default='1.0.0')
+    current_model_version = db.Column(db.String(16), default='0.0')
+    wifi_ssid = db.Column(db.String(64), default='')
+    wifi_password = db.Column(db.String(128), default='')
+    is_online = db.Column(db.Boolean, default=False)
+    last_seen = db.Column(db.DateTime)
+    ip_address = db.Column(db.String(45), default='')
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+
+class Firmware(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    version = db.Column(db.String(16), unique=True, nullable=False)
+    device_model = db.Column(db.String(32), default='STM32F407ZGT6')
+    filename = db.Column(db.String(256), nullable=False)
+    file_path = db.Column(db.String(512), nullable=False)
+    file_size = db.Column(db.Integer, default=0)
+    file_md5 = db.Column(db.String(32), default='')
+    release_notes = db.Column(db.Text, default='')
+    is_active = db.Column(db.Boolean, default=False)
+    uploaded_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=utcnow)
+    published_at = db.Column(db.DateTime)
+
+
+class ModelVersion(db.Model):
+    __tablename__ = 'model_version'
+    id = db.Column(db.Integer, primary_key=True)
+    version = db.Column(db.String(16), nullable=False)
+    device_model = db.Column(db.String(32), default='STM32F407ZGT6')
+    model_name = db.Column(db.String(64), default='')
+    filename = db.Column(db.String(256), nullable=False)
+    file_path = db.Column(db.String(512), nullable=False)
+    file_size = db.Column(db.Integer, default=0)
+    file_md5 = db.Column(db.String(32), default='')
+    description = db.Column(db.Text, default='')
+    is_active = db.Column(db.Boolean, default=False)
+    uploaded_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=utcnow)
+    published_at = db.Column(db.DateTime)
+
+
+class Patch(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    patch_type = db.Column(db.String(16), nullable=False)
+    from_version = db.Column(db.String(16), nullable=False)
+    to_version = db.Column(db.String(16), nullable=False)
+    device_model = db.Column(db.String(32), default='')
+    filename = db.Column(db.String(256), nullable=False)
+    file_path = db.Column(db.String(512), nullable=False)
+    file_size = db.Column(db.Integer, default=0)
+    file_md5 = db.Column(db.String(32), default='')
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+
+class PushRecord(db.Model):
+    __tablename__ = 'push_record'
+    id = db.Column(db.Integer, primary_key=True)
+    target_device_id = db.Column(db.Integer, db.ForeignKey('device.id'))
+    push_type = db.Column(db.String(16), nullable=False)
+    version = db.Column(db.String(16), nullable=False)
+    update_mode = db.Column(db.String(16), default='full')
+    status = db.Column(db.String(16), default='pending')
+    progress = db.Column(db.Integer, default=0)
+    pushed_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=utcnow)
+    completed_at = db.Column(db.DateTime)
+    device = db.relationship('Device', backref='push_records')
+
+
+class Feedback(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    device_id = db.Column(db.Integer, db.ForeignKey('device.id'), nullable=True)
+    subject = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(16), default='unread')
+    reply = db.Column(db.Text, default='')
+    created_at = db.Column(db.DateTime, default=utcnow)
+    replied_at = db.Column(db.DateTime)
+    device = db.relationship('Device', backref='feedbacks')
+
+
+class ServerLog(db.Model):
+    __tablename__ = 'server_log'
+    id = db.Column(db.Integer, primary_key=True)
+    level = db.Column(db.String(10), default='INFO')
+    module = db.Column(db.String(50), default='')
+    message = db.Column(db.Text, nullable=False)
+    device_id = db.Column(db.String(64), default='')
+    ip_address = db.Column(db.String(45), default='')
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+
+# ============================================================
+# Login Manager
+# ============================================================
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return redirect(url_for('login'))
+        if current_user.role != 'admin':
+            abort(403)
+        return f(*args, **kwargs)
+    return decorated
+
+
+# ============================================================
+# Auth Routes
+# ============================================================
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        if current_user.role == 'admin':
+            return redirect(url_for('admin_dashboard'))
+        return redirect(url_for('user_dashboard'))
+    if request.method == 'POST':
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        user = User.query.filter_by(username=username).first()
+        if user and user.check_password(password):
+            login_user(user)
+            user.last_login = utcnow()
+            db.session.commit()
+            log_event('INFO', 'Auth', f'Login: {username}',
+                     ip_address=request.remote_addr)
+            if user.role == 'admin':
+                return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('user_dashboard'))
+        flash('Username or password incorrect')
+        log_event('WARNING', 'Auth', f'Failed login: {username}',
+                 ip_address=request.remote_addr)
+    return render_template('login.html')
+
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        email = request.form.get('email', '').strip()
+        if not username or not password:
+            flash('Username and password required')
+        elif User.query.filter_by(username=username).first():
+            flash('Username taken')
+        else:
+            user = User(username=username, email=email, role='user')
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+            log_event('INFO', 'Auth', f'Registered: {username}')
+            flash('Registered, please login')
+            return redirect(url_for('login'))
+    return render_template('register.html')
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    log_event('INFO', 'Auth', f'Logout: {current_user.username}')
+    logout_user()
+    flash('已退出登录')
+    return redirect(url_for('login'))
+
+
+@app.route('/')
+def index():
+    if not current_user.is_authenticated:
+        return redirect(url_for('login'))
+    if current_user.role == 'admin':
+        return redirect(url_for('admin_dashboard'))
+    return redirect(url_for('user_dashboard'))
+
+
+# ============================================================
+# Admin - Dashboard
+# ============================================================
+
+@app.route('/admin')
+@admin_required
+def admin_dashboard():
+    return render_template('admin_dashboard.html',
+        users=User.query.all(),
+        devices=Device.query.all(),
+        firmwares=Firmware.query.order_by(Firmware.created_at.desc()).all(),
+        models=ModelVersion.query.order_by(ModelVersion.created_at.desc()).all(),
+        unread_feedbacks=Feedback.query.filter_by(status='unread').count(),
+        online_devices=Device.query.filter_by(is_online=True).count(),
+        total_devices=Device.query.count(),
+        total_users=User.query.count(),
+        recent_logs=ServerLog.query.order_by(ServerLog.created_at.desc()).limit(5).all()
+    )
+
+
+@app.route('/admin/users')
+@admin_required
+def admin_users():
+    return render_template('admin_users.html',
+        users=User.query.all(),
+        devices=Device.query.all(),
+        unread_feedbacks=Feedback.query.filter_by(status='unread').count()
+    )
+
+
+@app.route('/admin/firmware')
+@admin_required
+def admin_firmware():
+    return render_template('admin_firmware.html',
+        firmwares=Firmware.query.order_by(Firmware.created_at.desc()).all(),
+        unread_feedbacks=Feedback.query.filter_by(status='unread').count()
+    )
+
+
+@app.route('/admin/firmware/upload', methods=['POST'])
+@admin_required
+def admin_firmware_upload():
+    file = request.files.get('firmware')
+    version = request.form.get('version', '').strip()
+    device_model = request.form.get('device_model', 'STM32F407ZGT6').strip()
+    notes = request.form.get('release_notes', '').strip()
+    if not file or not version:
+        flash('Version and file required')
+        return redirect(url_for('admin_firmware'))
+    if Firmware.query.filter_by(version=version).first():
+        flash(f'Version {version} exists')
+        return redirect(url_for('admin_firmware'))
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'firmware',
+                             f'{version}_{filename}')
+    file.save(file_path)
+    file_size = os.path.getsize(file_path)
+    file_md5 = hashlib.md5(open(file_path, 'rb').read()).hexdigest()
+    fw = Firmware(
+        version=version, device_model=device_model, filename=filename,
+        file_path=file_path, file_size=file_size, file_md5=file_md5,
+        release_notes=notes, uploaded_by=current_user.id
+    )
+    db.session.add(fw)
+    db.session.commit()
+    log_event('INFO', 'Firmware', f'Uploaded v{version} ({file_size}B)')
+    flash(f'Firmware v{version} uploaded ({file_size} bytes)')
+    return redirect(url_for('admin_firmware'))
+
+
+@app.route('/admin/firmware/publish/<int:fw_id>', methods=['POST'])
+@admin_required
+def admin_firmware_publish(fw_id):
+    fw = db.session.get(Firmware, fw_id)
+    if fw:
+        fw.is_active = True
+        fw.published_at = utcnow()
+        db.session.commit()
+        log_event('INFO', 'Firmware', f'Published v{fw.version}')
+        flash(f'v{fw.version} published')
+    return redirect(url_for('admin_firmware'))
+
+
+@app.route('/admin/firmware/unpublish/<int:fw_id>', methods=['POST'])
+@admin_required
+def admin_firmware_unpublish(fw_id):
+    fw = db.session.get(Firmware, fw_id)
+    if fw:
+        fw.is_active = False
+        fw.published_at = None
+        db.session.commit()
+        log_event('INFO', 'Firmware', f'Unpublished v{fw.version}')
+        flash(f'v{fw.version} unpublished')
+    return redirect(url_for('admin_firmware'))
+
+
+@app.route('/admin/firmware/delete/<int:fw_id>', methods=['POST'])
+@admin_required
+def admin_firmware_delete(fw_id):
+    fw = db.session.get(Firmware, fw_id)
+    if fw:
+        if os.path.exists(fw.file_path):
+            os.remove(fw.file_path)
+        Patch.query.filter_by(patch_type='firmware').filter(
+            (Patch.from_version == fw.version) | (Patch.to_version == fw.version)
+        ).delete()
+        db.session.delete(fw)
+        db.session.commit()
+        log_event('INFO', 'Firmware', f'Deleted v{fw.version}')
+        flash(f'v{fw.version} deleted')
+    return redirect(url_for('admin_firmware'))
+
+
+@app.route('/admin/model')
+@admin_required
+def admin_model():
+    return render_template('admin_model.html',
+        models=ModelVersion.query.order_by(ModelVersion.created_at.desc()).all(),
+        unread_feedbacks=Feedback.query.filter_by(status='unread').count()
+    )
+
+
+@app.route('/admin/model/upload', methods=['POST'])
+@admin_required
+def admin_model_upload():
+    file = request.files.get('model_file')
+    version = request.form.get('version', '').strip()
+    model_name = request.form.get('model_name', '').strip()
+    device_model = request.form.get('device_model', 'STM32F407ZGT6').strip()
+    description = request.form.get('description', '').strip()
+    if not file or not version:
+        flash('Version and file required')
+        return redirect(url_for('admin_model'))
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'models',
+                             f'{version}_{filename}')
+    file.save(file_path)
+    file_size = os.path.getsize(file_path)
+    file_md5 = hashlib.md5(open(file_path, 'rb').read()).hexdigest()
+    mv = ModelVersion(
+        version=version, device_model=device_model, model_name=model_name,
+        filename=filename, file_path=file_path, file_size=file_size,
+        file_md5=file_md5, description=description, uploaded_by=current_user.id
+    )
+    db.session.add(mv)
+    db.session.commit()
+    log_event('INFO', 'Model', f'Uploaded v{version} ({file_size}B)')
+    flash(f'Model v{version} uploaded ({file_size} bytes)')
+    return redirect(url_for('admin_model'))
+
+
+@app.route('/admin/model/publish/<int:model_id>', methods=['POST'])
+@admin_required
+def admin_model_publish(model_id):
+    mv = db.session.get(ModelVersion, model_id)
+    if mv:
+        mv.is_active = True
+        mv.published_at = utcnow()
+        db.session.commit()
+        log_event('INFO', 'Model', f'Published v{mv.version}')
+        flash(f'Model v{mv.version} published')
+    return redirect(url_for('admin_model'))
+
+
+@app.route('/admin/model/unpublish/<int:model_id>', methods=['POST'])
+@admin_required
+def admin_model_unpublish(model_id):
+    mv = db.session.get(ModelVersion, model_id)
+    if mv:
+        mv.is_active = False
+        mv.published_at = None
+        db.session.commit()
+        log_event('INFO', 'Model', f'Unpublished v{mv.version}')
+        flash(f'Model v{mv.version} unpublished')
+    return redirect(url_for('admin_model'))
+
+
+@app.route('/admin/model/delete/<int:model_id>', methods=['POST'])
+@admin_required
+def admin_model_delete(model_id):
+    mv = db.session.get(ModelVersion, model_id)
+    if mv:
+        if os.path.exists(mv.file_path):
+            os.remove(mv.file_path)
+        Patch.query.filter_by(patch_type='model').filter(
+            (Patch.from_version == mv.version) | (Patch.to_version == mv.version)
+        ).delete()
+        db.session.delete(mv)
+        db.session.commit()
+        log_event('INFO', 'Model', f'Deleted v{mv.version}')
+        flash(f'Model v{mv.version} deleted')
+    return redirect(url_for('admin_model'))
+
+
+@app.route('/admin/push')
+@admin_required
+def admin_push():
+    return render_template('admin_push.html',
+        devices=Device.query.all(),
+        firmwares=Firmware.query.filter_by(is_active=True).all(),
+        models=ModelVersion.query.filter_by(is_active=True).all(),
+        patches=Patch.query.all(),
+        push_history=PushRecord.query.order_by(
+            PushRecord.created_at.desc()).limit(50).all(),
+        unread_feedbacks=Feedback.query.filter_by(status='unread').count()
+    )
+
+
+@app.route('/admin/push/send', methods=['POST'])
+@admin_required
+def admin_push_send():
+    device_ids = request.form.getlist('device_ids')
+    push_type = request.form.get('push_type', 'firmware')
+    version = request.form.get('version', '')
+    update_mode = request.form.get('update_mode', 'full')
+    if not device_ids or not version:
+        flash('Select devices and version')
+        return redirect(url_for('admin_push'))
+    count = 0
+    for did in device_ids:
+        device = db.session.get(Device, int(did))
+        if device:
+            db.session.add(PushRecord(
+                target_device_id=device.id, push_type=push_type,
+                version=version, update_mode=update_mode,
+                pushed_by=current_user.id
+            ))
+            count += 1
+    db.session.commit()
+    log_event('INFO', 'Push', f'{push_type} v{version} to {count} devices')
+    flash(f'Pushed {push_type} v{version} to {count} devices')
+    return redirect(url_for('admin_push'))
+
+
+@app.route('/admin/patch/delete/<int:patch_id>', methods=['POST'])
+@admin_required
+def admin_patch_delete(patch_id):
+    p = db.session.get(Patch, patch_id)
+    if p:
+        if os.path.exists(p.file_path):
+            os.remove(p.file_path)
+        log_event('INFO', 'Patch',
+                 f'Deleted {p.from_version}->{p.to_version}')
+        db.session.delete(p)
+        db.session.commit()
+        flash(f'Patch {p.from_version}->{p.to_version} deleted')
+    return redirect(url_for('admin_push'))
+
+
+# ============================================================
+# ★ Patch Generation (BSDIFF40 + deflate) ★
+# ============================================================
+
+@app.route('/admin/patch/generate', methods=['POST'])
+@admin_required
+def admin_patch_generate():
+    import bsdiff4
+
+    patch_type = request.form.get('patch_type', 'firmware')
+    from_ver = request.form.get('from_version', '')
+    to_ver = request.form.get('to_version', '')
+
+    if not from_ver or not to_ver:
+        flash('Select versions')
+        return redirect(url_for('admin_push'))
+
+    if patch_type == 'firmware':
+        from_item = Firmware.query.filter_by(version=from_ver).first()
+        to_item = Firmware.query.filter_by(version=to_ver).first()
+    else:
+        from_item = ModelVersion.query.filter_by(version=from_ver).first()
+        to_item = ModelVersion.query.filter_by(version=to_ver).first()
+
+    if not from_item or not to_item:
+        flash('Version not found')
+        return redirect(url_for('admin_push'))
+
+    if Patch.query.filter_by(
+        patch_type=patch_type, from_version=from_ver, to_version=to_ver
+    ).first():
+        flash('Patch exists')
+        return redirect(url_for('admin_push'))
+
+    patch_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'patches')
+    os.makedirs(patch_dir, exist_ok=True)
+    raw_path = os.path.join(patch_dir,
+                            f'{patch_type}_{from_ver}_to_{to_ver}.raw')
+    patch_filename = f'{patch_type}_{from_ver}_to_{to_ver}.bsdiff'
+    patch_path = os.path.join(patch_dir, patch_filename)
+
+    try:
+        print(f"\n{'='*60}")
+        print(f"[PATCH] Generating: {from_ver} -> {to_ver}")
+        print(f"[PATCH] Old: {from_item.file_path} ({from_item.file_size}B)")
+        print(f"[PATCH] New: {to_item.file_path} ({to_item.file_size}B)")
+
+        # 1. 用 bsdiff4 库生成原始补丁 (bz2 压缩的 BSDIFF40 格式)
+        bsdiff4.file_diff(from_item.file_path, to_item.file_path, raw_path)
+        raw_size = os.path.getsize(raw_path)
+        print(f"[PATCH] bsdiff4 output: {raw_size} bytes (bz2 compressed)")
+
+        # 2. 解析 bsdiff4 输出的 BSDIFF40 格式
+        with open(raw_path, 'rb') as f:
+            data = f.read()
+
+        if data[:8] != b'BSDIFF40':
+            raise ValueError("Bad BSDIFF40 signature")
+
+        # BSDIFF40 头: 8字节魔数 + 3个8字节有符号整数
+        ctrl_len_c = struct.unpack('<q', data[8:16])[0]
+        diff_len_c = struct.unpack('<q', data[16:24])[0]
+        new_size   = struct.unpack('<q', data[24:32])[0]
+
+        ctrl_compressed  = data[32:32 + ctrl_len_c]
+        diff_compressed  = data[32 + ctrl_len_c:32 + ctrl_len_c + diff_len_c]
+        extra_compressed = data[32 + ctrl_len_c + diff_len_c:]
+
+        # 3. bz2 解压得到原始数据段
+        ctrl_data = bz2.decompress(ctrl_compressed)
+        diff_data = bz2.decompress(diff_compressed)
+        extra_data = bz2.decompress(extra_compressed)
+
+        print(f"[PATCH] Decompressed: ctrl={len(ctrl_data)} "
+              f"diff={len(diff_data)} extra={len(extra_data)}")
+
+        # 4. 用 deflate (zlib) 重新压缩各段 (嵌入端 uzlib 流式解压兼容)
+        ctrl_deflate  = zlib.compress(bytes(ctrl_data), 9)
+        diff_deflate  = zlib.compress(bytes(diff_data), 9)
+        extra_deflate = zlib.compress(bytes(extra_data), 9)
+
+        print(f"[PATCH] deflate compress: "
+              f"ctrl {len(ctrl_data)}->{len(ctrl_deflate)}, "
+              f"diff {len(diff_data)}->{len(diff_deflate)}, "
+              f"extra {len(extra_data)}->{len(extra_deflate)}")
+
+        # 5. 写入 BSDIFF40 格式补丁 (deflate 压缩版本)
+        #    格式: [8B magic][8B ctrl_len][8B diff_len][8B new_size]
+        #          [ctrl_deflate][diff_deflate][extra_deflate]
+        with open(patch_path, 'wb') as f:
+            f.write(b'BSDIFF40')
+            f.write(struct.pack('<q', len(ctrl_deflate)))
+            f.write(struct.pack('<q', len(diff_deflate)))
+            f.write(struct.pack('<q', new_size))
+            f.write(ctrl_deflate)
+            f.write(diff_deflate)
+            f.write(extra_deflate)
+
+        # 清理临时文件
+        if os.path.exists(raw_path):
+            os.remove(raw_path)
+
+    except Exception as e:
+        if os.path.exists(raw_path):
+            os.remove(raw_path)
+        if os.path.exists(patch_path):
+            os.remove(patch_path)
+        flash(f'Patch failed: {e}')
+        print(f"[PATCH] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return redirect(url_for('admin_push'))
+
+    patch_size = os.path.getsize(patch_path)
+    patch_md5 = hashlib.md5(open(patch_path, 'rb').read()).hexdigest()
+
+    db.session.add(Patch(
+        patch_type=patch_type, from_version=from_ver, to_version=to_ver,
+        device_model=to_item.device_model, filename=patch_filename,
+        file_path=patch_path, file_size=patch_size, file_md5=patch_md5
+    ))
+    db.session.commit()
+
+    savings = round((1 - patch_size / max(to_item.file_size, 1)) * 100, 1)
+
+    print(f"[PATCH] Final BSDIFF40+deflate: {patch_size} bytes "
+          f"(full={to_item.file_size}, save {savings}%)")
+    print(f"{'='*60}\n")
+
+    log_event('INFO', 'Patch',
+             f'{from_ver}->{to_ver} ({patch_size}B, save {savings}%)')
+
+    flash(f'Patch: {from_ver}->{to_ver} '
+          f'({patch_size}B, save {savings}%)')
+    return redirect(url_for('admin_push'))
+
+
+@app.route('/admin/feedback')
+@admin_required
+def admin_feedback():
+    return render_template('admin_feedback.html',
+        feedbacks=Feedback.query.order_by(Feedback.created_at.desc()).all(),
+        unread_feedbacks=Feedback.query.filter_by(status='unread').count()
+    )
+
+
+@app.route('/admin/feedback/reply/<int:fb_id>', methods=['POST'])
+@admin_required
+def admin_feedback_reply(fb_id):
+    fb = db.session.get(Feedback, fb_id)
+    if fb:
+        fb.reply = request.form.get('reply', '')
+        fb.status = 'replied'
+        fb.replied_at = utcnow()
+        db.session.commit()
+        flash('Reply sent')
+    return redirect(url_for('admin_feedback'))
+
+
+@app.route('/admin/logs')
+@admin_required
+def admin_logs():
+    level_filter = request.args.get('level', '')
+    query = ServerLog.query.order_by(ServerLog.created_at.desc())
+    if level_filter:
+        query = query.filter_by(level=level_filter)
+    return render_template('admin_logs.html',
+        logs=query.limit(200).all(),
+        level_filter=level_filter,
+        unread_feedbacks=Feedback.query.filter_by(status='unread').count()
+    )
+
+
+@app.route('/user')
+@login_required
+def user_dashboard():
+    if current_user.role == 'admin':
+        return redirect(url_for('admin_dashboard'))
+    return render_template('user_dashboard.html',
+        devices=Device.query.filter_by(user_id=current_user.id).all(),
+        firmwares=Firmware.query.filter_by(is_active=True).order_by(
+            Firmware.created_at.desc()).all(),
+        models=ModelVersion.query.filter_by(is_active=True).order_by(
+            ModelVersion.created_at.desc()).all(),
+        latest_firmware=Firmware.query.filter_by(is_active=True).order_by(
+            Firmware.created_at.desc()).first(),
+        latest_model=ModelVersion.query.filter_by(is_active=True).order_by(
+            ModelVersion.created_at.desc()).first()
+    )
+
+
+@app.route('/user/device/add', methods=['GET', 'POST'])
+@login_required
+def user_device_add():
+    if request.method == 'POST':
+        device_id = request.form.get('device_id', '').strip()
+        device_model = request.form.get('device_model', 'STM32F407ZGT6').strip()
+        wifi_ssid = request.form.get('wifi_ssid', '').strip()
+        wifi_password = request.form.get('wifi_password', '').strip()
+        if not device_id:
+            flash('Device ID required')
+        elif Device.query.filter_by(device_id=device_id).first():
+            flash('Device already registered')
+        else:
+            device = Device(
+                device_id=device_id, device_model=device_model,
+                user_id=current_user.id, wifi_ssid=wifi_ssid,
+                wifi_password=wifi_password
+            )
+            db.session.add(device)
+            db.session.commit()
+            log_event('INFO', 'Device',
+                     f'{current_user.username} added {device_id}')
+            flash(f'Device {device_id} added')
+            return redirect(url_for('user_dashboard'))
+    return render_template('user_device_add.html')
+
+
+@app.route('/user/device/<int:dev_id>/wifi', methods=['GET', 'POST'])
+@login_required
+def user_device_wifi(dev_id):
+    device = db.session.get(Device, dev_id)
+    if not device or device.user_id != current_user.id:
+        abort(403)
+    if request.method == 'POST':
+        device.wifi_ssid = request.form.get('wifi_ssid', '').strip()
+        device.wifi_password = request.form.get('wifi_password', '').strip()
+        db.session.commit()
+        log_event('INFO', 'Device',
+                 f'WiFi updated: {device.device_id} -> {device.wifi_ssid}')
+        flash('WiFi config updated')
+        return redirect(url_for('user_dashboard'))
+    return render_template('user_device_wifi.html', device=device)
+
+
+@app.route('/user/device/delete/<int:dev_id>', methods=['POST'])
+@login_required
+def user_device_delete(dev_id):
+    device = db.session.get(Device, dev_id)
+    if device and device.user_id == current_user.id:
+        log_event('INFO', 'Device',
+                 f'{current_user.username} deleted {device.device_id}')
+        db.session.delete(device)
+        db.session.commit()
+        flash('Device deleted')
+    return redirect(url_for('user_dashboard'))
+
+
+@app.route('/user/feedback', methods=['GET', 'POST'])
+@login_required
+def user_feedback():
+    if request.method == 'POST':
+        subject = request.form.get('subject', '').strip()
+        content = request.form.get('content', '').strip()
+        device_id = request.form.get('device_id') or None
+        if subject and content:
+            db.session.add(Feedback(
+                user_id=current_user.id, device_id=device_id,
+                subject=subject, content=content
+            ))
+            db.session.commit()
+            flash('Feedback submitted')
+            return redirect(url_for('user_feedback_list'))
+    return render_template('user_feedback_new.html',
+        devices=Device.query.filter_by(user_id=current_user.id).all()
+    )
+
+
+@app.route('/user/feedback/list')
+@login_required
+def user_feedback_list():
+    return render_template('user_feedback.html',
+        feedbacks=Feedback.query.filter_by(user_id=current_user.id)
+            .order_by(Feedback.created_at.desc()).all()
+    )
+
+
+@app.route('/api/user/download', methods=['POST'])
+@login_required
+def user_download():
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        return jsonify({"code": 400, "message": "Invalid JSON"})
+
+    dtype = data.get('type', 'firmware')
+    version = data.get('version', '')
+    offset = int(data.get('offset', 0))
+    length = int(data.get('length', 2048))
+
+    if not version:
+        return jsonify({"code": 400, "message": "Missing version"})
+
+    if dtype == 'firmware':
+        item = Firmware.query.filter_by(
+            version=version, is_active=True).first()
+    else:
+        item = ModelVersion.query.filter_by(
+            version=version, is_active=True).first()
+
+    if not item or not os.path.exists(item.file_path):
+        return jsonify({"code": 404, "message": "File not found"})
+
+    try:
+        with open(item.file_path, 'rb') as f:
+            f.seek(offset)
+            chunk = f.read(length)
+    except Exception as e:
+        return jsonify({"code": 500, "message": str(e)})
+
+    body = json.dumps({
+        "code": 200,
+        "total_size": item.file_size,
+        "chunk_size": len(chunk),
+        "data": chunk.hex()
+    }, separators=(',', ':'))
+
+    return body, 200, {
+        'Content-Type': 'application/json',
+        'Connection': 'keep-alive'
+    }
+
+
+@app.route('/dashboard')
+@login_required
+def dashboard_page():
+    return render_template('dashboard.html')
+
+
+@app.route('/api/dashboard/stats')
+@login_required
+def dash_stats():
+    active_fw = Firmware.query.filter_by(is_active=True).order_by(
+        Firmware.created_at.desc()).first()
+    return jsonify({
+        'total': Device.query.count(),
+        'online': Device.query.filter_by(is_online=True).count(),
+        'fwCount': Firmware.query.count(),
+        'active': active_fw.version if active_fw else '---'
+    })
+
+
+@app.route('/api/dashboard/devices')
+@login_required
+def dash_devices():
+    if current_user.role == 'admin':
+        devices = Device.query.all()
+    else:
+        devices = Device.query.filter_by(user_id=current_user.id).all()
+    return jsonify([{
+        'id': d.device_id,
+        'fw': d.current_sys_version or '0.0',
+        'model': d.device_model or '',
+        'partition': d.current_sys_version or '?',
+        'online': d.is_online,
+        'last_seen': d.last_seen.isoformat() if d.last_seen else None,
+        'ip': d.ip_address or ''
+    } for d in devices])
+
+
+@app.route('/api/dashboard/firmware', methods=['GET'])
+@login_required
+def dash_firmware_list():
+    fws = Firmware.query.order_by(Firmware.created_at.desc()).all()
+    active = Firmware.query.filter_by(is_active=True).order_by(
+        Firmware.created_at.desc()).first()
+    return jsonify({
+        'list': [{
+            'version': f.version,
+            'size': f.file_size,
+            'md5': f.file_md5 or '',
+            'time': f.created_at.isoformat() if f.created_at else None
+        } for f in fws],
+        'active': active.version if active else ''
+    })
+
+
+@app.route('/api/dashboard/upload', methods=['POST'])
+@login_required
+def dash_upload():
+    version = request.form.get('version', '').strip()
+    file = request.files.get('firmware')
+    if not version or not file:
+        return jsonify({'ok': False, 'error': 'Version and file required'})
+    if Firmware.query.filter_by(version=version).first():
+        return jsonify({'ok': False, 'error': f'Version {version} exists'})
+    filename = secure_filename(file.filename) or f'fw_{version}.bin'
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'firmware',
+                             f'{version}_{filename}')
+    file.save(file_path)
+    file_size = os.path.getsize(file_path)
+    file_md5 = hashlib.md5(open(file_path, 'rb').read()).hexdigest()
+    db.session.add(Firmware(
+        version=version, filename=filename, file_path=file_path,
+        file_size=file_size, file_md5=file_md5, uploaded_by=current_user.id
+    ))
+    db.session.commit()
+    log_event('INFO', 'Dashboard', f'Uploaded v{version} ({file_size}B)')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/dashboard/activate', methods=['POST'])
+@login_required
+def dash_activate():
+    data = request.get_json(force=True)
+    fw = Firmware.query.filter_by(version=data.get('version', '')).first()
+    if not fw:
+        return jsonify({'ok': False, 'error': 'Version not found'})
+    fw.is_active = True
+    fw.published_at = utcnow()
+    db.session.commit()
+    log_event('INFO', 'Dashboard', f'Activated v{fw.version}')
+    return jsonify({'ok': True, 'active': fw.version})
+
+
+@app.route('/api/dashboard/firmware', methods=['DELETE'])
+@login_required
+def dash_firmware_delete():
+    data = request.get_json(force=True)
+    fw = Firmware.query.filter_by(version=data.get('version', '')).first()
+    if not fw:
+        return jsonify({'ok': False, 'error': 'Version not found'})
+    if os.path.exists(fw.file_path):
+        os.remove(fw.file_path)
+    db.session.delete(fw)
+    db.session.commit()
+    log_event('WARNING', 'Dashboard', f'Deleted v{fw.version}')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/dashboard/log')
+@login_required
+def dash_log():
+    logs = ServerLog.query.order_by(ServerLog.created_at.desc()).limit(100).all()
+    result = []
+    for l in logs:
+        lvl = (l.level or 'INFO').lower()
+        if lvl == 'warning':
+            lvl = 'warning'
+        elif lvl in ('error', 'critical'):
+            lvl = 'error'
+        else:
+            lvl = 'info'
+        result.append({
+            't': l.created_at.isoformat() if l.created_at else '',
+            'type': lvl,
+            'msg': l.message or ''
+        })
+    return jsonify(result)
+
+
+# ============================================================
+# OTA Device API
+# ============================================================
+
+@app.route('/api/ota/register', methods=['POST'])
+def ota_register():
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        return jsonify({"code": 400, "message": "Invalid JSON"})
+    device_id = data.get('device_id', '')
+    if not device_id:
+        return jsonify({"code": 400, "message": "Missing device_id"})
+    device = Device.query.filter_by(device_id=device_id).first()
+    if not device:
+        device = Device(
+            device_id=device_id,
+            device_model=data.get('device_model', 'STM32F407ZGT6'),
+            last_seen=utcnow(), ip_address=request.remote_addr
+        )
+        db.session.add(device)
+    device.is_online = True
+    device.last_seen = utcnow()
+    device.ip_address = request.remote_addr
+    db.session.commit()
+    log_event('INFO', 'OTA', f'Device online: {device_id}',
+             device_id=device_id, ip_address=request.remote_addr)
+    return jsonify({
+        "code": 200, "message": "OK",
+        "wifi_ssid": device.wifi_ssid,
+        "wifi_password": device.wifi_password
+    })
+
+
+@app.route('/api/ota/heartbeat', methods=['POST'])
+def ota_heartbeat():
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        return jsonify({"code": 400, "message": "Invalid JSON"})
+    device = Device.query.filter_by(
+        device_id=data.get('device_id', '')).first()
+    if not device:
+        return jsonify({"code": 404, "message": "Device not found"})
+    device.is_online = True
+    device.last_seen = utcnow()
+    device.ip_address = request.remote_addr
+    if data.get('sys_ver'):
+        device.current_sys_version = data['sys_ver']
+    if data.get('model_ver'):
+        device.current_model_version = data['model_ver']
+    pending = PushRecord.query.filter_by(
+        target_device_id=device.id, status='pending').first()
+    db.session.commit()
+    return jsonify({
+        "code": 200,
+        "push_pending": pending is not None,
+        "wifi_ssid": device.wifi_ssid,
+        "wifi_password": device.wifi_password
+    })
+
+
+@app.route('/api/ota/check_firmware', methods=['POST'])
+def ota_check_firmware():
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        return jsonify({"code": 400, "message": "Invalid JSON"})
+    device = Device.query.filter_by(
+        device_id=data.get('device_id', '')).first()
+    if not device:
+        return jsonify({"code": 404, "message": "Device not found"})
+    current_ver = data.get('current_ver', '0.0')
+    latest_fw = Firmware.query.filter_by(
+        is_active=True, device_model=device.device_model
+    ).order_by(Firmware.created_at.desc()).first()
+    if not latest_fw or current_ver >= latest_fw.version:
+        return jsonify({"code": 200, "update_available": False})
+    result = {
+        "code": 200, "update_available": True,
+        "new_version": latest_fw.version,
+        "file_size": latest_fw.file_size,
+        "file_md5": latest_fw.file_md5,
+        "release_notes": latest_fw.release_notes or "",
+        "download_url": "/api/ota/download_raw"
+    }
+    patch = Patch.query.filter_by(
+        patch_type='firmware', from_version=current_ver,
+        to_version=latest_fw.version).first()
+    result["patch_available"] = patch is not None
+    if patch:
+        result["patch_size"] = patch.file_size
+        result["patch_md5"] = patch.file_md5
+    log_event('INFO', 'OTA',
+             f'{data.get("device_id")} check fw: {current_ver}->{latest_fw.version}',
+             device_id=data.get('device_id', ''))
+    return jsonify(result)
+
+
+@app.route('/api/ota/check_model', methods=['POST'])
+def ota_check_model():
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        return jsonify({"code": 400, "message": "Invalid JSON"})
+    device = Device.query.filter_by(
+        device_id=data.get('device_id', '')).first()
+    if not device:
+        return jsonify({"code": 404, "message": "Device not found"})
+    current_ver = data.get('current_ver', '0.0')
+    latest_model = ModelVersion.query.filter_by(
+        is_active=True, device_model=device.device_model
+    ).order_by(ModelVersion.created_at.desc()).first()
+    if not latest_model or current_ver >= latest_model.version:
+        return jsonify({"code": 200, "update_available": False})
+    result = {
+        "code": 200, "update_available": True,
+        "new_version": latest_model.version,
+        "model_name": latest_model.model_name,
+        "file_size": latest_model.file_size,
+        "file_md5": latest_model.file_md5,
+        "description": latest_model.description or "",
+        "download_url": "/api/ota/download_raw"
+    }
+    patch = Patch.query.filter_by(
+        patch_type='model', from_version=current_ver,
+        to_version=latest_model.version).first()
+    result["patch_available"] = patch is not None
+    if patch:
+        result["patch_size"] = patch.file_size
+        result["patch_md5"] = patch.file_md5
+    log_event('INFO', 'OTA',
+             f'{data.get("device_id")} check model: {current_ver}->{latest_model.version}',
+             device_id=data.get('device_id', ''))
+    return jsonify(result)
+
+
+@app.route('/api/ota/download', methods=['POST'])
+def ota_download():
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        return jsonify({"code": 400, "message": "Invalid JSON"})
+    dtype = data.get('type', 'firmware')
+    version = data.get('version', '')
+    offset = int(data.get('offset', 0))
+    length = int(data.get('length', 512))
+    if not version:
+        return jsonify({"code": 400, "message": "Missing version"})
+    if dtype == 'firmware':
+        item = Firmware.query.filter_by(
+            version=version, is_active=True).first()
+    else:
+        item = ModelVersion.query.filter_by(
+            version=version, is_active=True).first()
+    if not item or not os.path.exists(item.file_path):
+        return jsonify({"code": 404, "message": "File not found"})
+    try:
+        with open(item.file_path, 'rb') as f:
+            f.seek(offset)
+            chunk = f.read(length)
+    except Exception as e:
+        return jsonify({"code": 500, "message": str(e)})
+    body = json.dumps({
+        "code": 200,
+        "total_size": item.file_size,
+        "chunk_size": len(chunk),
+        "data": chunk.hex()
+    }, separators=(',', ':'))
+    return body, 200, {
+        'Content-Type': 'application/json',
+        'Connection': 'keep-alive'
+    }
+
+
+@app.route('/api/ota/download_patch', methods=['POST'])
+def ota_download_patch():
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        return jsonify({"code": 400, "message": "Invalid JSON"})
+    patch = Patch.query.filter_by(
+        patch_type=data.get('type', 'firmware'),
+        from_version=data.get('from_version', ''),
+        to_version=data.get('to_version', '')).first()
+    if not patch or not os.path.exists(patch.file_path):
+        return jsonify({"code": 404, "message": "Patch not found"})
+    offset = int(data.get('offset', 0))
+    length = int(data.get('length', 512))
+    try:
+        with open(patch.file_path, 'rb') as f:
+            f.seek(offset)
+            chunk = f.read(length)
+    except Exception as e:
+        return jsonify({"code": 500, "message": str(e)})
+    body = json.dumps({
+        "code": 200,
+        "total_size": patch.file_size,
+        "chunk_size": len(chunk),
+        "data": chunk.hex()
+    }, separators=(',', ':'))
+    return body, 200, {
+        'Content-Type': 'application/json',
+        'Connection': 'keep-alive'
+    }
+
+
+# ============================================================
+# ★ OTA Raw Binary Download — 透传模式长连接支持 ★
+# ============================================================
+
+@app.route('/api/ota/download_raw', methods=['POST'])
+def ota_download_raw():
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        return jsonify({"code": 400, "message": "Invalid JSON"}), 400
+
+    dtype = data.get('type', 'firmware')
+    version = data.get('version', '') or data.get('to_version', '')
+    from_version = data.get('from_version', '')
+    offset = int(data.get('offset', 0))
+    length = int(data.get('length', 0))
+
+    if not version:
+        return jsonify({"code": 400, "message": "Missing version"}), 400
+
+    # ---- 确定文件路径 ----
+    file_path = None
+    file_size = 0
+    fname = ''
+
+    if from_version:
+        patch = Patch.query.filter_by(
+            patch_type=dtype,
+            from_version=from_version,
+            to_version=version
+        ).first()
+        if patch and os.path.exists(patch.file_path):
+            file_path = patch.file_path
+            file_size = patch.file_size
+            fname = patch.filename
+    elif dtype == 'firmware':
+        item = Firmware.query.filter_by(
+            version=version, is_active=True).first()
+        if item and os.path.exists(item.file_path):
+            file_path = item.file_path
+            file_size = item.file_size
+            fname = item.filename
+    else:
+        item = ModelVersion.query.filter_by(
+            version=version, is_active=True).first()
+        if item and os.path.exists(item.file_path):
+            file_path = item.file_path
+            file_size = item.file_size
+            fname = item.filename
+
+    if not file_path:
+        return jsonify({"code": 404, "message": "File not found"}), 404
+
+    # ---- 分块模式: offset + length 指定 ----
+    if length > 0:
+        try:
+            with open(file_path, 'rb') as f:
+                f.seek(offset)
+                chunk = f.read(length)
+        except Exception as e:
+            return jsonify({"code": 500, "message": str(e)}), 500
+
+        chunk_len = len(chunk)
+        log_event('INFO', 'OTA',
+                 f'chunk {dtype} v{version} off={offset} len={chunk_len}',
+                 ip_address=request.remote_addr)
+
+        return Response(
+            chunk,
+            status=200,
+            mimetype='application/octet-stream',
+            headers={
+                'Content-Length': str(chunk_len),
+                'Content-Disposition': 'inline',
+                'Connection': 'keep-alive',
+                'Accept-Ranges': 'bytes',
+            }
+        )
+
+    # ---- 整包模式(兼容旧客户端) ----
+    log_event('INFO', 'OTA',
+             f'download_raw {dtype} v{version} full ({file_size}B)',
+             ip_address=request.remote_addr)
+
+    return send_file(
+        file_path,
+        mimetype='application/octet-stream',
+        as_attachment=False,
+        download_name=fname
+    )
+
+
+# ============================================================
+# Error Handlers
+# ============================================================
+
+@app.errorhandler(404)
+def not_found(e):
+    if request.path.startswith('/api/'):
+        return jsonify({"code": 404, "message": "Not found"}), 404
+    return '<h2>404</h2>', 404
+
+
+@app.errorhandler(403)
+def forbidden(e):
+    if request.path.startswith('/api/'):
+        return jsonify({"code": 403, "message": "Forbidden"}), 403
+    return '<h2>403</h2>', 403
+
+
+@app.errorhandler(500)
+def server_error(e):
+    if request.path.startswith('/api/'):
+        return jsonify({"code": 500, "message": "Internal error"}), 500
+    return '<h2>500</h2>', 500
+
+
+# ============================================================
+# Init & Run
+# ============================================================
+
+def init_db():
+    with app.app_context():
+        db.create_all()
+        if not User.query.filter_by(username='admin').first():
+            admin = User(username='admin', role='admin',
+                        email='admin@ota.local')
+            admin.set_password('admin123')
+            db.session.add(admin)
+            db.session.commit()
+            print('[INIT] Admin: admin / admin123')
+
+
+if __name__ == '__main__':
+    init_db()
+    app.run(host='0.0.0.0', port=8080, debug=False)
