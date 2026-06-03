@@ -1,11 +1,12 @@
-# app.py - OTA Server v2.5 (透传模式长连接支持)
-# 修改点: download_raw 分块响应增加 Connection: keep-alive
+# app.py - OTA Server v2.5 (BSDIFF40 + deflate 压缩)
+# 修改点: 补丁格式从 BSPAT01+RLE 改为 BSDIFF40+deflate, 适配嵌入端流式解压
 
 import os
 import json
 import hashlib
 import struct
 import bz2
+import zlib
 from datetime import datetime, timezone
 from functools import wraps
 
@@ -67,30 +68,6 @@ def log_event(level, module, message, device_id='', ip_address=''):
         db.session.commit()
     except Exception:
         db.session.rollback()
-
-
-# ============================================================
-# RLE Encoding for bsdiff diff stream
-# ============================================================
-
-def rle_encode(data):
-    """RLE encode mostly-zero data."""
-    result = bytearray()
-    i = 0
-    n = len(data)
-    while i < n:
-        if data[i] == 0:
-            count = 0
-            while i < n and data[i] == 0 and count < 65535:
-                count += 1
-                i += 1
-            result.append(0x00)
-            result.append((count >> 8) & 0xFF)
-            result.append(count & 0xFF)
-        else:
-            result.append(data[i])
-            i += 1
-    return bytes(result)
 
 
 # ============================================================
@@ -555,7 +532,7 @@ def admin_patch_delete(patch_id):
 
 
 # ============================================================
-# ★ Patch Generation (bsdiff + RLE) ★
+# ★ Patch Generation (BSDIFF40 + deflate) ★
 # ============================================================
 
 @app.route('/admin/patch/generate', methods=['POST'])
@@ -601,24 +578,28 @@ def admin_patch_generate():
         print(f"[PATCH] Old: {from_item.file_path} ({from_item.file_size}B)")
         print(f"[PATCH] New: {to_item.file_path} ({to_item.file_size}B)")
 
+        # 1. 用 bsdiff4 库生成原始补丁 (bz2 压缩的 BSDIFF40 格式)
         bsdiff4.file_diff(from_item.file_path, to_item.file_path, raw_path)
         raw_size = os.path.getsize(raw_path)
         print(f"[PATCH] bsdiff4 output: {raw_size} bytes (bz2 compressed)")
 
+        # 2. 解析 bsdiff4 输出的 BSDIFF40 格式
         with open(raw_path, 'rb') as f:
             data = f.read()
 
         if data[:8] != b'BSDIFF40':
-            raise ValueError("Bad signature")
+            raise ValueError("Bad BSDIFF40 signature")
 
+        # BSDIFF40 头: 8字节魔数 + 3个8字节有符号整数
         ctrl_len_c = struct.unpack('<q', data[8:16])[0]
         diff_len_c = struct.unpack('<q', data[16:24])[0]
-        new_size = struct.unpack('<q', data[24:32])[0]
+        new_size   = struct.unpack('<q', data[24:32])[0]
 
-        ctrl_compressed = data[32:32 + ctrl_len_c]
-        diff_compressed = data[32 + ctrl_len_c:32 + ctrl_len_c + diff_len_c]
+        ctrl_compressed  = data[32:32 + ctrl_len_c]
+        diff_compressed  = data[32 + ctrl_len_c:32 + ctrl_len_c + diff_len_c]
         extra_compressed = data[32 + ctrl_len_c + diff_len_c:]
 
+        # 3. bz2 解压得到原始数据段
         ctrl_data = bz2.decompress(ctrl_compressed)
         diff_data = bz2.decompress(diff_compressed)
         extra_data = bz2.decompress(extra_compressed)
@@ -626,20 +607,29 @@ def admin_patch_generate():
         print(f"[PATCH] Decompressed: ctrl={len(ctrl_data)} "
               f"diff={len(diff_data)} extra={len(extra_data)}")
 
-        diff_rle = rle_encode(diff_data)
-        print(f"[PATCH] RLE: diff {len(diff_data)} -> {len(diff_rle)} bytes "
-              f"({len(diff_rle)*100//max(len(diff_data),1)}%)")
+        # 4. 用 deflate (zlib) 重新压缩各段 (嵌入端 uzlib 流式解压兼容)
+        ctrl_deflate  = zlib.compress(bytes(ctrl_data), 9)
+        diff_deflate  = zlib.compress(bytes(diff_data), 9)
+        extra_deflate = zlib.compress(bytes(extra_data), 9)
 
+        print(f"[PATCH] deflate compress: "
+              f"ctrl {len(ctrl_data)}->{len(ctrl_deflate)}, "
+              f"diff {len(diff_data)}->{len(diff_deflate)}, "
+              f"extra {len(extra_data)}->{len(extra_deflate)}")
+
+        # 5. 写入 BSDIFF40 格式补丁 (deflate 压缩版本)
+        #    格式: [8B magic][8B ctrl_len][8B diff_len][8B new_size]
+        #          [ctrl_deflate][diff_deflate][extra_deflate]
         with open(patch_path, 'wb') as f:
-            f.write(b'BSPAT01\0')
-            f.write(struct.pack('<I', len(ctrl_data)))
-            f.write(struct.pack('<I', len(diff_rle)))
-            f.write(struct.pack('<I', len(extra_data)))
-            f.write(struct.pack('<I', int(new_size)))
-            f.write(ctrl_data)
-            f.write(diff_rle)
-            f.write(extra_data)
+            f.write(b'BSDIFF40')
+            f.write(struct.pack('<q', len(ctrl_deflate)))
+            f.write(struct.pack('<q', len(diff_deflate)))
+            f.write(struct.pack('<q', new_size))
+            f.write(ctrl_deflate)
+            f.write(diff_deflate)
+            f.write(extra_deflate)
 
+        # 清理临时文件
         if os.path.exists(raw_path):
             os.remove(raw_path)
 
@@ -666,7 +656,7 @@ def admin_patch_generate():
 
     savings = round((1 - patch_size / max(to_item.file_size, 1)) * 100, 1)
 
-    print(f"[PATCH] Final: {patch_size} bytes "
+    print(f"[PATCH] Final BSDIFF40+deflate: {patch_size} bytes "
           f"(full={to_item.file_size}, save {savings}%)")
     print(f"{'='*60}\n")
 
@@ -1266,7 +1256,6 @@ def ota_download_raw():
                  f'chunk {dtype} v{version} off={offset} len={chunk_len}',
                  ip_address=request.remote_addr)
 
-        # ★ 透传模式: 返回原始二进制, 保持连接 keep-alive ★
         return Response(
             chunk,
             status=200,
@@ -1274,7 +1263,7 @@ def ota_download_raw():
             headers={
                 'Content-Length': str(chunk_len),
                 'Content-Disposition': 'inline',
-                'Connection': 'keep-alive',        # 关键: 长连接
+                'Connection': 'keep-alive',
                 'Accept-Ranges': 'bytes',
             }
         )
