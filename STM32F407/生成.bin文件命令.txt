@@ -1,0 +1,2 @@
+cmd /c copy /Y "..\..\Output\atk_f407.bin" "C:\Users\Administrator\Desktop\firmware\firmwareA.bin"
+cmd /c copy /Y "..\..\Output\atk_f407.bin" "C:\Users\Administrator\Desktop\firmware\firmwareB.bin"

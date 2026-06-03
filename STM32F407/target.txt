@@ -1,0 +1,58 @@
+A：
+LR_IROM1 0x08040000 0x00060000 {
+
+  ER_IROM1 0x08040000 0x00060000 {
+    *.o (RESET, +First)
+    *(InRoot$$Sections)
+    .ANY (+RO)
+    .ANY (+XO)
+  }
+
+  RW_IRAM1 0x20000000 0x00020000 {
+    .ANY (+RW +ZI)
+  }
+
+  RW_CCM_BASE 0x10000000 UNINIT 0x00007000 {
+    malloc.o(.bss.ARM.__at_0x10000000)
+  }
+
+  RW_CCM_DATA 0x10007000 0x00009000 {
+    .ANY (+RW +ZI)
+  }
+
+  RW_EXT_POOL 0x68000000 UNINIT 0x00100000 {
+    malloc.o(.bss.ARM.__at_0x68000000)
+    malloc.o(.bss.ARM.__at_0x680F0000)
+    malloc.o(.bss.ARM.__at_0x680F0C00)
+  }
+}
+
+
+B：
+LR_IROM1 0x080A0000 0x00060000 {
+
+  ER_IROM1 0x080A0000 0x00060000 {
+    *.o (RESET, +First)
+    *(InRoot$$Sections)
+    .ANY (+RO)
+    .ANY (+XO)
+  }
+
+  RW_IRAM1 0x20000000 0x00020000 {
+    .ANY (+RW +ZI)
+  }
+
+  RW_CCM_BASE 0x10000000 UNINIT 0x00007000 {
+    malloc.o(.bss.ARM.__at_0x10000000)
+  }
+
+  RW_CCM_DATA 0x10007000 0x00009000 {
+    .ANY (+RW +ZI)
+  }
+
+  RW_EXT_POOL 0x68000000 UNINIT 0x00100000 {
+    malloc.o(.bss.ARM.__at_0x68000000)
+    malloc.o(.bss.ARM.__at_0x680F0000)
+    malloc.o(.bss.ARM.__at_0x680F0C00)
+  }
+}
