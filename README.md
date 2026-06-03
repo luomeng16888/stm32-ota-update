@@ -128,7 +128,7 @@
 
 # \- \*\*调试器：\*\* ST-Link V2
 
-# \- \*\*云端：\*\* Python 3.x + Flask + SQLite
+# \- \*\*云端：\*\* Python 13.x + Flask + SQLite
 
 # \- \*\*模型工具：\*\* X-CUBE-AI v10.2.0
 
